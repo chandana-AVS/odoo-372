@@ -1,0 +1,549 @@
+// PeoplePay360 — HR & Payroll
+// See ARCHITECTURE.md §4 Domain model
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum RoleName {
+  EMPLOYEE
+  HR_MANAGER
+  HR_PAYROLL_USER
+  HR_PAYROLL_MANAGER
+  ADMIN
+}
+
+enum EmployeeType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+}
+
+enum ContractStatus {
+  DRAFT
+  RUNNING
+  EXPIRED
+  CANCELLED
+}
+
+enum CalendarType {
+  FULL_TIME
+  PART_TIME
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  OVERTIME
+  MISSING_CHECKOUT
+}
+
+enum TimeOffUnit {
+  DAY
+  HOUR
+}
+
+enum TimeOffState {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REFUSED
+  CANCELLED
+}
+
+enum AllocationState {
+  DRAFT
+  APPROVED
+  REFUSED
+}
+
+enum RuleCategory {
+  BASIC
+  ALLOWANCE
+  GROSS
+  DEDUCTION
+  NET
+}
+
+enum ComputationType {
+  FIXED
+  PERCENTAGE
+  FORMULA
+}
+
+/// Base a PERCENTAGE rule is applied to.
+enum PercentageBase {
+  CONTRACT_WAGE
+  BASIC
+  GROSS
+  CATEGORY_BASIC
+  CATEGORY_ALLOWANCE
+  CATEGORY_DEDUCTION
+}
+
+enum PayrunState {
+  DRAFT
+  COMPUTED
+  VALIDATED
+  PAID
+}
+
+enum PayslipState {
+  DRAFT
+  COMPUTED
+  VALIDATED
+  PAID
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access  (ARCHITECTURE §5)
+// ---------------------------------------------------------------------------
+
+model Company {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  currency String  @default("INR")
+  isActive Boolean @default(true)
+
+  employees   Employee[]
+  departments Department[]
+  schedules   WorkingSchedule[]
+  structures  SalaryStructure[]
+  payruns     Payrun[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // A user account is linked to the employee it represents (mockup: "link the
+  // account to the relevant employee").
+  employeeId String?   @unique
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  roles UserRole[]
+
+  approvedRequests    TimeOffRequest[]    @relation("RequestApprover")
+  approvedAllocations TimeOffAllocation[] @relation("AllocationApprover")
+  editedAttendances   Attendance[]        @relation("AttendanceEditor")
+  createdPayruns      Payrun[]            @relation("PayrunCreator")
+
+  @@index([email])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        RoleName @unique
+  description String?
+
+  users UserRole[]
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+// ---------------------------------------------------------------------------
+// HR master data  (ARCHITECTURE §4)
+// ---------------------------------------------------------------------------
+
+model Department {
+  id        String  @id @default(cuid())
+  name      String
+  code      String  @unique
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  employees Employee[]
+  contracts Contract[]
+  payruns   Payrun[]
+}
+
+model JobPosition {
+  id   String @id @default(cuid())
+  name String @unique
+
+  employees Employee[]
+  contracts Contract[]
+}
+
+/// The Employee record is the central hub of the whole platform.
+model Employee {
+  id            String       @id @default(cuid())
+  code          String       @unique
+  firstName     String
+  lastName      String
+  workEmail     String       @unique
+  personalEmail String?
+  phone         String?
+  avatarUrl     String?
+  workLocation  String?
+  employeeType  EmployeeType @default(FULL_TIME)
+
+  /// Nullable on purpose — drives the MISSING_BANK_ACCOUNT payroll warning.
+  bankAccount String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  jobPositionId String?
+  jobPosition   JobPosition? @relation(fields: [jobPositionId], references: [id])
+
+  managerId String?
+  manager   Employee?  @relation("EmployeeManager", fields: [managerId], references: [id])
+  reports   Employee[] @relation("EmployeeManager")
+
+  workingScheduleId String?
+  workingSchedule   WorkingSchedule? @relation(fields: [workingScheduleId], references: [id])
+
+  user        User?
+  contracts   Contract[]
+  attendances Attendance[]
+  requests    TimeOffRequest[]
+  allocations TimeOffAllocation[]
+  payslips    Payslip[]
+
+  @@index([departmentId])
+  @@index([employeeType])
+  @@index([isActive])
+}
+
+/// I1: many contracts over time, exactly one RUNNING contract per period.
+model Contract {
+  id        String    @id @default(cuid())
+  reference String    @unique
+  startDate DateTime  @db.Date
+  endDate   DateTime? @db.Date
+
+  wage          Decimal        @db.Decimal(12, 2)
+  structureType String         @default("Employee Salary")
+  status        ContractStatus @default(DRAFT)
+  notes         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  jobPositionId String?
+  jobPosition   JobPosition? @relation(fields: [jobPositionId], references: [id])
+
+  workingScheduleId String?
+  workingSchedule   WorkingSchedule? @relation(fields: [workingScheduleId], references: [id])
+
+  salaryStructureId String?
+  salaryStructure   SalaryStructure? @relation(fields: [salaryStructureId], references: [id])
+
+  payslips Payslip[]
+
+  @@index([employeeId, status])
+  @@index([startDate, endDate])
+}
+
+/// Weekly working pattern. hoursPerWeek / daysPerWeek are DERIVED from lines,
+/// never entered by hand (ARCHITECTURE §4).
+model WorkingSchedule {
+  id           String       @id @default(cuid())
+  name         String
+  calendarType CalendarType @default(FULL_TIME)
+  isActive     Boolean      @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  lines     ScheduleLine[]
+  employees Employee[]
+  contracts Contract[]
+
+  @@unique([companyId, name])
+}
+
+model ScheduleLine {
+  id           String @id @default(cuid())
+  scheduleId   String
+  /// 0 = Monday … 6 = Sunday
+  dayOfWeek    Int
+  /// "09:00"
+  startTime    String
+  /// "18:00"
+  endTime      String
+  breakMinutes Int    @default(0)
+
+  schedule WorkingSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+}
+
+// ---------------------------------------------------------------------------
+// Attendance
+// ---------------------------------------------------------------------------
+
+model Attendance {
+  id          String           @id @default(cuid())
+  employeeId  String
+  date        DateTime         @db.Date
+  checkIn     DateTime
+  checkOut    DateTime?
+  workedHours Decimal          @default(0) @db.Decimal(6, 2)
+  status      AttendanceStatus @default(PRESENT)
+
+  isManualEdit Boolean @default(false)
+  editedById   String?
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  editedBy User?    @relation("AttendanceEditor", fields: [editedById], references: [id])
+
+  @@index([employeeId, date])
+  @@index([date])
+}
+
+// ---------------------------------------------------------------------------
+// Time Off  (I3)
+// ---------------------------------------------------------------------------
+
+model TimeOffType {
+  id                 String      @id @default(cuid())
+  name               String      @unique
+  code               String      @unique
+  unit               TimeOffUnit @default(DAY)
+  requiresAllocation Boolean     @default(true)
+  requiresApproval   Boolean     @default(true)
+  isPaid             Boolean     @default(true)
+  /// When true, approved leave of this type feeds the payroll engine.
+  affectsPayroll     Boolean     @default(false)
+  color              String      @default("#4f46e5")
+  isActive           Boolean     @default(true)
+
+  requests    TimeOffRequest[]
+  allocations TimeOffAllocation[]
+}
+
+model TimeOffAllocation {
+  id           String          @id @default(cuid())
+  employeeId   String
+  typeId       String
+  allocatedQty Decimal         @db.Decimal(8, 2)
+  /// Incremented transactionally when a request is approved.
+  takenQty     Decimal         @default(0) @db.Decimal(8, 2)
+  validFrom    DateTime        @db.Date
+  validTo      DateTime        @db.Date
+  state        AllocationState @default(DRAFT)
+  approvedById String?
+  description  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee   Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type       TimeOffType      @relation(fields: [typeId], references: [id])
+  approvedBy User?            @relation("AllocationApprover", fields: [approvedById], references: [id])
+  requests   TimeOffRequest[]
+
+  @@index([employeeId, typeId, state])
+}
+
+model TimeOffRequest {
+  id          String       @id @default(cuid())
+  employeeId  String
+  typeId      String
+  /// Set when the request is approved against a specific allocation.
+  allocationId String?
+  dateFrom    DateTime     @db.Date
+  dateTo      DateTime     @db.Date
+  duration    Decimal      @db.Decimal(8, 2)
+  description String?
+  state       TimeOffState @default(DRAFT)
+
+  approvedById String?
+  approvedAt   DateTime?
+  refusalReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee   Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type       TimeOffType        @relation(fields: [typeId], references: [id])
+  allocation TimeOffAllocation? @relation(fields: [allocationId], references: [id])
+  approvedBy User?              @relation("RequestApprover", fields: [approvedById], references: [id])
+
+  @@index([employeeId, state])
+  @@index([dateFrom, dateTo])
+}
+
+// ---------------------------------------------------------------------------
+// Payroll configuration  (I2)
+// ---------------------------------------------------------------------------
+
+model SalaryStructure {
+  id       String  @id @default(cuid())
+  name     String
+  code     String  @unique
+  isActive Boolean @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  rules     SalaryRule[]
+  contracts Contract[]
+  payruns   Payrun[]
+  payslips  Payslip[]
+}
+
+/// Rules execute in ascending `sequence`; later rules read earlier results.
+model SalaryRule {
+  id       String @id @default(cuid())
+  name     String
+  code     String
+  sequence Int    @default(10)
+
+  category        RuleCategory
+  computationType ComputationType @default(FIXED)
+
+  amountFixed    Decimal?        @db.Decimal(12, 2)
+  percentage     Decimal?        @db.Decimal(6, 3)
+  percentageBase PercentageBase?
+  /// Sandboxed expression that assigns `result`.
+  formula        String?
+  /// Optional guard expression; rule is skipped when it evaluates falsy.
+  condition      String?
+  quantity       Decimal         @default(1) @db.Decimal(8, 2)
+  isActive       Boolean         @default(true)
+
+  structureId String
+  structure   SalaryStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+
+  lines PayslipLine[]
+
+  @@unique([structureId, code])
+  @@index([structureId, sequence])
+}
+
+// ---------------------------------------------------------------------------
+// Payroll processing  (ARCHITECTURE §7)
+// ---------------------------------------------------------------------------
+
+model Payrun {
+  id          String      @id @default(cuid())
+  name        String
+  periodStart DateTime    @db.Date
+  periodEnd   DateTime    @db.Date
+  state       PayrunState @default(DRAFT)
+
+  /// Scope captured in wizard step 1.
+  employeeType EmployeeType?
+  departmentId String?
+
+  companyId         String
+  salaryStructureId String
+  createdById       String?
+
+  computedAt  DateTime?
+  validatedAt DateTime?
+  paidAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company         Company         @relation(fields: [companyId], references: [id])
+  department      Department?     @relation(fields: [departmentId], references: [id])
+  salaryStructure SalaryStructure @relation(fields: [salaryStructureId], references: [id])
+  createdBy       User?           @relation("PayrunCreator", fields: [createdById], references: [id])
+
+  payslips Payslip[]
+
+  @@index([periodStart, periodEnd])
+  @@index([state])
+}
+
+model Payslip {
+  id          String       @id @default(cuid())
+  number      String       @unique
+  payrunId    String?
+  employeeId  String
+  contractId  String?
+  salaryStructureId String
+  periodStart DateTime     @db.Date
+  periodEnd   DateTime     @db.Date
+  state       PayslipState @default(DRAFT)
+
+  workedDays  Decimal @default(0) @db.Decimal(6, 2)
+  workedHours Decimal @default(0) @db.Decimal(8, 2)
+  leaveDays   Decimal @default(0) @db.Decimal(6, 2)
+
+  grossAmount Decimal @default(0) @db.Decimal(12, 2)
+  netAmount   Decimal @default(0) @db.Decimal(12, 2)
+
+  /// Array of { code, severity, message } produced by WarningCollector.
+  warnings Json @default("[]")
+
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  payrun          Payrun?         @relation(fields: [payrunId], references: [id], onDelete: Cascade)
+  employee        Employee        @relation(fields: [employeeId], references: [id])
+  contract        Contract?       @relation(fields: [contractId], references: [id])
+  salaryStructure SalaryStructure @relation(fields: [salaryStructureId], references: [id])
+
+  lines PayslipLine[]
+
+  /// One payslip per employee per payrun.
+  @@unique([payrunId, employeeId])
+  /// Supports the DUPLICATE_PAYSLIP check across payruns.
+  @@index([employeeId, periodStart, periodEnd])
+  @@index([state])
+}
+
+model PayslipLine {
+  id        String       @id @default(cuid())
+  payslipId String
+  ruleId    String?
+  code      String
+  name      String
+  category  RuleCategory
+  sequence  Int
+  quantity  Decimal      @default(1) @db.Decimal(8, 2)
+  rate      Decimal      @default(0) @db.Decimal(12, 4)
+  /// Deductions are stored negative.
+  amount    Decimal      @db.Decimal(12, 2)
+
+  payslip Payslip     @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+  rule    SalaryRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@index([payslipId, sequence])
+}

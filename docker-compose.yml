@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pp360-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: peoplepay
+      POSTGRES_PASSWORD: peoplepay
+      POSTGRES_DB: peoplepay360
+    ports:
+      - "5433:5432"
+    volumes:
+      - pp360-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peoplepay -d peoplepay360"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pp360-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+
+  # Catches every outgoing payslip email. UI at http://localhost:8025
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: pp360-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  pp360-db-data:

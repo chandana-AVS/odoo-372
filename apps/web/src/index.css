@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Light is the base; dark overrides only the values, so every
+   component stays theme-agnostic.
+--------------------------------------------------------------------------- */
+@layer base {
+  :root {
+    --bg: 250 250 251;
+    --surface: 255 255 255;
+    --elevated: 255 255 255;
+    --line: 228 228 231;
+    --ink: 24 24 27;
+    --muted: 113 113 122;
+    --faint: 161 161 170;
+
+    --brand: 79 70 229;
+    --brand-soft: 238 242 255;
+    --brand-ink: 67 56 202;
+
+    --ok: 22 163 74;
+    --warn: 217 119 6;
+    --danger: 220 38 38;
+    --info: 2 132 199;
+  }
+
+  .dark {
+    --bg: 9 9 11;
+    --surface: 24 24 27;
+    --elevated: 32 32 36;
+    --line: 39 39 42;
+    --ink: 244 244 245;
+    --muted: 161 161 170;
+    --faint: 113 113 122;
+
+    --brand: 129 140 248;
+    --brand-soft: 30 27 75;
+    --brand-ink: 165 180 252;
+
+    --ok: 74 222 128;
+    --warn: 251 191 36;
+    --danger: 248 113 113;
+    --info: 56 189 248;
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-bg text-ink antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Numbers in tables and money must line up. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Consistent, visible focus for keyboard users. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand/60 ring-offset-2 ring-offset-bg;
+  }
+
+  ::-webkit-scrollbar {
+    @apply h-2 w-2;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-line;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+}
+
+@layer components {
+  /* Horizontal scroll container for wide tables — the page itself never
+     scrolls sideways. */
+  .scroll-x {
+    @apply -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0;
+    scrollbar-width: thin;
+  }
+}

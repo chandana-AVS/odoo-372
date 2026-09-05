@@ -1,0 +1,24 @@
+{
+  "name": "peoplepay360",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "setup": "npm install && npm run db:up && npm run db:push -w @peoplepay360/api && npm run seed",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:push": "npm run prisma:push -w @peoplepay360/api",
+    "seed": "npm run seed -w @peoplepay360/api",
+    "studio": "npm run prisma:studio -w @peoplepay360/api",
+    "dev": "npm run dev -w @peoplepay360/api & npm run dev -w @peoplepay360/web",
+    "dev:api": "npm run dev -w @peoplepay360/api",
+    "dev:web": "npm run dev -w @peoplepay360/web",
+    "build": "npm run build -w @peoplepay360/api && npm run build -w @peoplepay360/web",
+    "test": "npm run test -w @peoplepay360/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

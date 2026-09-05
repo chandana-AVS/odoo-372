@@ -243,6 +243,8 @@ export function PayslipsPage() {
                       <Avatar
                         firstName={payslip.employee.firstName}
                         lastName={payslip.employee.lastName}
+                        avatarUrl={payslip.employee.avatarUrl}
+                        gender={payslip.employee.gender}
                         size="sm"
                       />
                       <span className="truncate font-medium">

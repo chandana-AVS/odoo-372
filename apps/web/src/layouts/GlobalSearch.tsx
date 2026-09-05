@@ -2,13 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 import {
   CalendarClock,
   CalendarDays,
-  CornerDownLeft,
   FileText,
   Layers,
   type LucideIcon,
   Receipt,
   Search,
   Users,
+  X,
 } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -47,18 +47,38 @@ const PAGES: { label: string; to: string; icon: LucideIcon; roles?: Role[] }[] =
   { label: 'User Management', to: '/admin/users', icon: Users, roles: ['ADMIN'] },
 ];
 
+/**
+ * Application-wide search living in the header.
+ *
+ * It behaves like the per-page search bars — a real input you type into, with
+ * matches dropping down beneath it — rather than opening a separate dialog.
+ */
 export function GlobalSearch() {
+  const navigate = useNavigate();
+  const { can } = useAuth();
+  const [query, setQuery] = React.useState('');
   const [open, setOpen] = React.useState(false);
+  const [cursor, setCursor] = React.useState(0);
+  const debounced = useDebounced(query, 200);
+  const term = debounced.trim();
 
-  // Cmd/Ctrl+K anywhere, and "/" when not already typing into a field.
+  const boxRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const listRef = React.useRef<HTMLDivElement>(null);
+
+  const isHr = can(...HR_ROLES);
+  const isPayroll = can(...PAYROLL_ROLES);
+
+  // Cmd/Ctrl+K focuses the field; "/" does too when not already typing.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      if (key === 'k' && (e.metaKey || e.ctrlKey)) {
+      const focus = () => {
         e.preventDefault();
-        setOpen((v) => !v);
-        return;
-      }
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      };
+      if (key === 'k' && (e.metaKey || e.ctrlKey)) return focus();
       if (key === '/' && !e.metaKey && !e.ctrlKey) {
         const el = document.activeElement;
         const typing =
@@ -66,45 +86,22 @@ export function GlobalSearch() {
           el instanceof HTMLTextAreaElement ||
           el instanceof HTMLSelectElement ||
           (el as HTMLElement | null)?.isContentEditable;
-        if (!typing) {
-          e.preventDefault();
-          setOpen(true);
-        }
+        if (!typing) focus();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="Search"
-        className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 text-muted transition-colors hover:border-faint/50 hover:text-ink sm:w-56 sm:px-3"
-      >
-        <Search className="h-3.5 w-3.5 shrink-0" />
-        <span className="hidden flex-1 text-left text-sm sm:block">Search…</span>
-        <kbd className="hidden rounded border border-line bg-elevated px-1.5 py-0.5 text-[10px] font-medium text-faint sm:block">
-          ⌘K
-        </kbd>
-      </button>
-      {open && <SearchPalette onClose={() => setOpen(false)} />}
-    </>
-  );
-}
-
-function SearchPalette({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate();
-  const { can } = useAuth();
-  const [query, setQuery] = React.useState('');
-  const [cursor, setCursor] = React.useState(0);
-  const debounced = useDebounced(query, 200);
-  const term = debounced.trim();
-  const listRef = React.useRef<HTMLDivElement>(null);
-
-  const isHr = can(...HR_ROLES);
-  const isPayroll = can(...PAYROLL_ROLES);
+  // Dismiss the dropdown on a click outside the box.
+  React.useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
 
   // Employees are searched on the server — the endpoint already supports `q`.
   const employees = useQuery({
@@ -257,15 +254,18 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
     (result?: Result) => {
       if (!result) return;
       navigate(result.to);
-      onClose();
+      setQuery('');
+      setOpen(false);
+      inputRef.current?.blur();
     },
-    [navigate, onClose],
+    [navigate],
   );
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      onClose();
+      setOpen(false);
+      inputRef.current?.blur();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       setCursor((c) => (results.length ? (c + 1) % results.length : 0));
@@ -278,51 +278,63 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
     }
   };
 
-  React.useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, []);
+  // The panel only drops once there is genuinely something to show.
+  const noResults = Boolean(term) && !loading && results.length === 0;
+  const showPanel = open && (results.length > 0 || noResults);
 
   let lastGroup = '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:pt-[12vh]">
-      <div
-        className="absolute inset-0 bg-zinc-950/50 backdrop-blur-[2px]"
-        onClick={onClose}
-        aria-hidden
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Search"
+    <div ref={boxRef} className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+      <input
+        ref={inputRef}
+        value={query}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
         onKeyDown={onKeyDown}
-        className="relative flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop animate-fade-up"
-      >
-        <div className="flex items-center gap-3 border-b border-line px-4">
-          <Search className="h-4 w-4 shrink-0 text-faint" />
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search employees, contracts, payruns, payslips, pages…"
-            className="h-12 flex-1 bg-transparent text-sm text-ink placeholder:text-faint focus:outline-none"
-          />
-          {loading && <Spinner />}
-        </div>
+        placeholder="Search…"
+        aria-label="Search the application"
+        className={cn(
+          'h-9 w-40 rounded-lg border border-line bg-surface pl-9 pr-8 text-sm text-ink',
+          'placeholder:text-faint transition-colors hover:border-faint/50',
+          'focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20',
+          'sm:w-56 lg:w-64',
+        )}
+      />
+      <span className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center">
+        {loading ? (
+          <Spinner className="h-3.5 w-3.5" />
+        ) : query ? (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery('');
+              inputRef.current?.focus();
+            }}
+            aria-label="Clear search"
+            className="rounded text-faint transition-colors hover:text-ink"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </span>
 
-        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">
-          {!term && (
-            <p className="px-3 py-8 text-center text-xs text-muted">
-              Start typing to search across the whole application.
-            </p>
+      {showPanel && (
+        <div
+          ref={listRef}
+          className={cn(
+            'absolute right-0 z-40 mt-1.5 max-h-[70vh] overflow-y-auto overscroll-contain',
+            'w-[min(28rem,calc(100vw-2rem))] rounded-xl border border-line bg-surface p-1.5',
+            'shadow-pop animate-fade-up',
           )}
-
-          {term && !loading && results.length === 0 && (
-            <p className="px-3 py-8 text-center text-xs text-muted">
-              No results for “{term}”.
+        >
+          {noResults && (
+            <p className="px-3 py-4 text-center text-xs text-muted">
+              No results for <span className="font-medium text-ink">{term}</span>
             </p>
           )}
 
@@ -333,7 +345,7 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
             return (
               <React.Fragment key={result.id}>
                 {header && (
-                  <p className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-faint">
+                  <p className="px-3 pb-1 pt-2.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
                     {header}
                   </p>
                 )}
@@ -362,21 +374,12 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
                     )}
                   </span>
                   {result.meta && <Badge tone="neutral">{result.meta}</Badge>}
-                  {index === cursor && (
-                    <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-faint" />
-                  )}
                 </button>
               </React.Fragment>
             );
           })}
         </div>
-
-        <div className="flex items-center gap-4 border-t border-line px-4 py-2 text-[11px] text-faint">
-          <span>↑↓ navigate</span>
-          <span>↵ open</span>
-          <span>esc close</span>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

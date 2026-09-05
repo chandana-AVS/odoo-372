@@ -122,8 +122,60 @@ const GENERATED = Array.from({ length: Math.max(0, HEADCOUNT - PEOPLE.length) },
   ] as const;
 });
 
+/**
+ * Real people with fixed work emails. Their address must survive re-seeding, so
+ * it is pinned here rather than derived from the name like everyone else.
+ */
+const NAMED: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  dept: string;
+  position: string;
+  wage: number;
+  type: EmployeeType;
+}[] = [
+  {
+    firstName: 'Chandana',
+    lastName: 'Avula',
+    email: 'chandana270406@gmail.com',
+    dept: 'HR',
+    position: 'HR Business Partner',
+    wage: 94000,
+    type: EmployeeType.FULL_TIME,
+  },
+  {
+    firstName: 'Vagdivi',
+    lastName: 'Naripinni',
+    email: 'vagdivinaripinni20@gmail.com',
+    dept: 'FIN',
+    position: 'Financial Analyst',
+    wage: 78000,
+    type: EmployeeType.FULL_TIME,
+  },
+  {
+    firstName: 'Rohit',
+    lastName: 'Vidyasagar',
+    email: 'rohitsairamvidyasagar@gmail.com',
+    dept: 'IT',
+    position: 'Software Engineer',
+    wage: 105000,
+    type: EmployeeType.FULL_TIME,
+  },
+];
+
 /** The full roster the seed actually walks. */
-const ROSTER = [...PEOPLE, ...GENERATED];
+const ROSTER = [
+  ...PEOPLE,
+  ...GENERATED,
+  ...NAMED.map(
+    (n) => [n.firstName, n.lastName, n.dept, n.position, n.wage, n.type] as const,
+  ),
+];
+
+/** Pinned address for a roster name, when one exists. */
+const pinnedEmail = (firstName: string, lastName: string) =>
+  NAMED.find((n) => n.firstName === firstName && n.lastName === lastName)?.email;
 
 async function main() {
   console.log('Resetting…');
@@ -183,6 +235,42 @@ async function main() {
           dayOfWeek,
           startTime: '09:00',
           endTime: '18:00',
+          breakMinutes: 60,
+        })),
+      },
+    },
+  });
+
+  // Second day shift — the 10-6 crowd.
+  const dayLate = await prisma.workingSchedule.create({
+    data: {
+      name: 'Day Shift (10-6)',
+      calendarType: 'FULL_TIME',
+      companyId: company.id,
+      lines: {
+        create: [0, 1, 2, 3, 4].map((dayOfWeek) => ({
+          dayOfWeek,
+          startTime: '10:00',
+          endTime: '18:00',
+          breakMinutes: 60,
+        })),
+      },
+    },
+  });
+
+  // Night shift runs 20:00 -> 04:00, so it crosses midnight. The end time is
+  // stored as the clock time on the FOLLOWING day; attendance accounts for the
+  // rollover when it computes worked hours.
+  const nightShift = await prisma.workingSchedule.create({
+    data: {
+      name: 'Night Shift (8pm-4am)',
+      calendarType: 'FULL_TIME',
+      companyId: company.id,
+      lines: {
+        create: [0, 1, 2, 3, 4].map((dayOfWeek) => ({
+          dayOfWeek,
+          startTime: '20:00',
+          endTime: '04:00',
           breakMinutes: 60,
         })),
       },
@@ -324,16 +412,27 @@ async function main() {
         code: `EMP${String(i + 1).padStart(4, '0')}`,
         firstName,
         lastName,
-        workEmail: `${firstName.toLowerCase()}.${lastName.toLowerCase()}.${String(
-          i + 1,
-        ).padStart(4, '0')}@oxp.com`,
+        workEmail:
+          pinnedEmail(firstName, lastName) ??
+          `${firstName.toLowerCase()}.${lastName.toLowerCase()}.${String(
+            i + 1,
+          ).padStart(4, '0')}@oxp.com`,
         phone: `+91 98${String(10000000 + i * 137).slice(0, 8)}`,
         workLocation: ['Mumbai', 'Bengaluru', 'Pune'][i % 3],
         employeeType: type,
         companyId: company.id,
         departmentId: deptId(dept),
         jobPositionId: posId(position),
-        workingScheduleId: type === EmployeeType.PART_TIME ? partTime.id : fullTime.id,
+        // Part-timers keep the short day; everyone else is spread across the
+        // three shift patterns (9-5, 10-6, and the 8pm-4am night shift).
+        workingScheduleId:
+          type === EmployeeType.PART_TIME
+            ? partTime.id
+            : i % 5 === 3
+              ? nightShift.id
+              : i % 5 === 1
+                ? dayLate.id
+                : fullTime.id,
         // Two employees deliberately have no bank account — this drives the
         // MISSING_BANK_ACCOUNT warning demoed on the payrun screen.
         bankAccount: i === 4 || i === 11 ? null : `IN${String(6011000000 + i * 7919)}`,
@@ -342,21 +441,43 @@ async function main() {
     employees.push({ ...employee, wage, type });
   }
 
-  // Managers
-  const manager = employees.find((e) => e.firstName === 'Rohit')!;
+  // ------------------------------------------------------------- managers
+  // Two managers per department. Without an explicit flag the manager dropdown
+  // would offer all 200 staff, which is unusable.
+  const MANAGERS_PER_DEPARTMENT = 2;
+  /** The hr.manager demo login is linked to this person. */
   const hrLead = employees.find((e) => e.firstName === 'Sara')!;
-  await prisma.employee.updateMany({
-    where: { departmentId: deptId('IT'), id: { not: manager.id } },
-    data: { managerId: manager.id },
-  });
-  await prisma.employee.updateMany({
-    where: { id: { in: employees.filter((e) => e.id !== hrLead.id).map((e) => e.id) } },
-    data: {},
-  });
-  await prisma.employee.update({
-    where: { id: employees[0].id },
-    data: { managerId: hrLead.id },
-  });
+  const managersByDept = new Map<string, SeededEmployee[]>();
+
+  for (const department of departments) {
+    const inDept = employees.filter((e) => e.departmentId === department.id);
+    if (!inDept.length) continue;
+
+    // Pick the best-paid people — a reasonable proxy for seniority.
+    const leads = [...inDept]
+      .sort((a, b) => b.wage - a.wage)
+      .slice(0, MANAGERS_PER_DEPARTMENT);
+    managersByDept.set(department.id, leads);
+
+    await prisma.employee.updateMany({
+      where: { id: { in: leads.map((l) => l.id) } },
+      data: { isManager: true },
+    });
+
+    // Everyone else in the department reports to the first lead; the second
+    // lead reports to the first, so the chain has no cycle.
+    const reports = inDept.filter((e) => !leads.some((l) => l.id === e.id));
+    await prisma.employee.updateMany({
+      where: { id: { in: reports.map((r) => r.id) } },
+      data: { managerId: leads[0].id },
+    });
+    if (leads[1]) {
+      await prisma.employee.update({
+        where: { id: leads[1].id },
+        data: { managerId: leads[0].id },
+      });
+    }
+  }
 
   // ----------------------------------------------------------- contracts
   const year = new Date().getFullYear();
@@ -429,12 +550,49 @@ async function main() {
   const today = new Date();
   const attendanceRows: any[] = [];
 
+  /**
+   * Roster times per schedule. The night shift ends at 04:00 the NEXT day, so
+   * its span is measured across midnight rather than as a negative interval.
+   */
+  const SHIFTS = [fullTime, dayLate, nightShift, partTime].map((schedule) => {
+    const [start, end] = (() => {
+      switch (schedule.id) {
+        case dayLate.id:
+          return ['10:00', '18:00'];
+        case nightShift.id:
+          return ['20:00', '04:00'];
+        case partTime.id:
+          return ['09:00', '13:00'];
+        default:
+          return ['09:00', '18:00'];
+      }
+    })();
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    let spanMinutes = eh * 60 + em - (sh * 60 + sm);
+    if (spanMinutes <= 0) spanMinutes += 24 * 60; // crosses midnight
+    const breakMinutes = schedule.id === partTime.id ? 0 : 60;
+    return {
+      id: schedule.id,
+      startHour: sh,
+      startMinute: sm,
+      spanMinutes: spanMinutes - breakMinutes,
+      breakMinutes,
+    };
+  });
+  const shiftFor = (scheduleId: string | null) =>
+    SHIFTS.find((s) => s.id === scheduleId) ?? SHIFTS[0];
+
   for (const employee of employees) {
     for (let dayOffset = attendanceDays; dayOffset >= 0; dayOffset--) {
       const date = new Date(today);
       date.setDate(date.getDate() - dayOffset);
-      date.setHours(0, 0, 0, 0);
       const weekday = date.getDay();
+      // Anchor the day at UTC midnight. setHours(0,0,0,0) would use local time,
+      // which in IST stores as 18:30 the PREVIOUS day and pushes every row into
+      // the wrong bucket.
+      date.setUTCFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+      date.setUTCHours(0, 0, 0, 0);
       if (weekday === 0 || weekday === 6) continue;
 
       // Deterministic pseudo-randomness so demos are reproducible.
@@ -449,11 +607,24 @@ async function main() {
       const overtime = seed >= 94;
       const missingCheckout = seed === 50;
 
-      const checkIn = new Date(date);
-      checkIn.setHours(late ? 9 : 8, late ? 42 : 55 + (seed % 5), 0, 0);
+      // Times come from the employee's OWN shift, per day — not one fixed
+      // clock time for the whole company.
+      const shift = shiftFor(employee.workingScheduleId);
 
+      // Arrive a few minutes either side of the rostered start; late arrivals
+      // land ~40 minutes in.
+      const checkIn = new Date(date);
+      checkIn.setHours(shift.startHour, shift.startMinute, 0, 0);
+      checkIn.setMinutes(checkIn.getMinutes() + (late ? 40 + (seed % 8) : -4 + (seed % 9)));
+
+      // Scheduled length, plus the break, plus overtime when it applies.
+      const plannedMinutes = shift.spanMinutes + shift.breakMinutes;
       const checkOut = missingCheckout ? null : new Date(checkIn);
-      if (checkOut) checkOut.setHours(checkIn.getHours() + (overtime ? 10 : 9), checkIn.getMinutes());
+      if (checkOut) {
+        checkOut.setMinutes(
+          checkOut.getMinutes() + plannedMinutes + (overtime ? 60 + (seed % 30) : seed % 12),
+        );
+      }
 
       attendanceRows.push({
         employeeId: employee.id,
@@ -461,7 +632,11 @@ async function main() {
         checkIn,
         checkOut,
         workedHours: checkOut
-          ? Math.round(((checkOut.getTime() - checkIn.getTime()) / 3_600_000) * 100) / 100
+          ? Math.round(
+              ((checkOut.getTime() - checkIn.getTime()) / 3_600_000 -
+                shift.breakMinutes / 60) *
+                100,
+            ) / 100
           : 0,
         status: missingCheckout
           ? AttendanceStatus.MISSING_CHECKOUT

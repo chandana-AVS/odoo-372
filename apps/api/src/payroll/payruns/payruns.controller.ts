@@ -51,6 +51,9 @@ export class PayrunsController {
     return this.payruns.markPaid(id);
   }
 
+  // Emailing payslips out is restricted to payroll staff and admins.
+  // (ADMIN bypasses every @Roles check in RolesGuard.)
+  @Roles(RoleName.HR_PAYROLL_MANAGER, RoleName.HR_PAYROLL_USER)
   @Post(':id/send-payslips')
   send(@Param('id') id: string) {
     return this.payruns.sendPayslips(id);

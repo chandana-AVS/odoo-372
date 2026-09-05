@@ -67,6 +67,12 @@ export class PayrunsService {
     });
     const alreadyPaid = new Map(existing.map((p) => [p.employeeId, p.number]));
 
+    // Two records for the same human is a genuine payroll risk — the person
+    // gets paid twice. Match on name and on a shared bank account, since a
+    // re-hire or a bad import usually collides on one or the other.
+    const ids = contracts.map((c) => c.employee.id);
+    const duplicateIds = await this.findDuplicateEmployeeIds(ids);
+
     return contracts.map((contract) => ({
       employeeId: contract.employee.id,
       code: contract.employee.code,
@@ -81,8 +87,69 @@ export class PayrunsService {
       workingSchedule: contract.workingSchedule?.name ?? contract.employee.workingSchedule?.name ?? null,
       payStructure: contract.salaryStructure?.name ?? null,
       hasBankAccount: Boolean(contract.employee.bankAccount),
+      hasWorkEmail: Boolean(contract.employee.workEmail?.trim()),
+      hasSalaryStructure: Boolean(contract.salaryStructureId),
       duplicatePayslip: alreadyPaid.get(contract.employee.id) ?? null,
+      duplicateOf: duplicateIds.get(contract.employee.id) ?? null,
     }));
+  }
+
+  /**
+   * Employees that look like the same person as somebody else. Returns a map of
+   * employee id -> a human description of who they clash with.
+   */
+  private async findDuplicateEmployeeIds(
+    ids: string[],
+  ): Promise<Map<string, string>> {
+    const clashes = new Map<string, string>();
+    if (!ids.length) return clashes;
+
+    const people = await this.prisma.employee.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        code: true,
+        firstName: true,
+        lastName: true,
+        bankAccount: true,
+      },
+    });
+
+    const byName = new Map<string, typeof people>();
+    const byBank = new Map<string, typeof people>();
+    for (const person of people) {
+      const nameKey = `${person.firstName.trim().toLowerCase()} ${person.lastName
+        .trim()
+        .toLowerCase()}`;
+      byName.set(nameKey, [...(byName.get(nameKey) ?? []), person]);
+
+      const bank = person.bankAccount?.trim();
+      if (bank) byBank.set(bank, [...(byBank.get(bank) ?? []), person]);
+    }
+
+    const wanted = new Set(ids);
+    const note = (person: { id: string }, text: string) => {
+      if (!wanted.has(person.id)) return;
+      const existing = clashes.get(person.id);
+      clashes.set(person.id, existing ? `${existing}; ${text}` : text);
+    };
+
+    for (const group of byName.values()) {
+      if (group.length < 2) continue;
+      for (const person of group) {
+        const others = group.filter((p) => p.id !== person.id).map((p) => p.code);
+        note(person, `same name as ${others.join(', ')}`);
+      }
+    }
+    for (const group of byBank.values()) {
+      if (group.length < 2) continue;
+      for (const person of group) {
+        const others = group.filter((p) => p.id !== person.id).map((p) => p.code);
+        note(person, `same bank account as ${others.join(', ')}`);
+      }
+    }
+
+    return clashes;
   }
 
   /** "Create Payrun" — the batch contains ONLY the selected employees. */

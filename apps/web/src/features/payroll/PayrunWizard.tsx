@@ -23,6 +23,7 @@ import {
 import { api } from '../../lib/api';
 import { cn, money, monthInput, monthRange, shortDate, titleCase } from '../../lib/format';
 import { useSearch } from '../../lib/search';
+import { PreflightPanel, hasBlockingIssues } from './PreflightPanel';
 
 interface Eligible {
   employeeId: string;
@@ -36,7 +37,10 @@ interface Eligible {
   workingSchedule: string | null;
   payStructure: string | null;
   hasBankAccount: boolean;
+  hasWorkEmail: boolean;
+  hasSalaryStructure: boolean;
   duplicatePayslip: string | null;
+  duplicateOf: string | null;
 }
 
 /**
@@ -117,6 +121,13 @@ export function PayrunWizard() {
     row.payStructure,
     row.wage,
   ]);
+
+  /** Only the ticked employees matter for pre-flight — the rest are excluded. */
+  const chosen = React.useMemo(
+    () => (eligible.data ?? []).filter((row) => selected.has(row.employeeId)),
+    [eligible.data, selected],
+  );
+  const blocked = React.useMemo(() => hasBlockingIssues(chosen), [chosen]);
 
   const allChecked = rows.length > 0 && rows.every((r) => selected.has(r.employeeId));
   const someChecked = rows.some((r) => selected.has(r.employeeId));
@@ -294,6 +305,13 @@ export function PayrunWizard() {
           {eligible.isLoading && <LoadingBlock rows={6} />}
           {eligible.error && <ErrorBlock error={eligible.error} />}
 
+          {/* Pre-flight: problems in the TICKED employees, before computing. */}
+          {eligible.data && eligible.data.length > 0 && (
+            <div className="px-5 pt-4">
+              <PreflightPanel rows={chosen} />
+            </div>
+          )}
+
           {eligible.data && rows.length === 0 && (
             <p className="px-5 py-12 text-center text-sm text-muted">
               No employee has a running contract covering {range.label}.
@@ -383,9 +401,14 @@ export function PayrunWizard() {
               </Button>
               <Button
                 variant="primary"
-                disabled={selected.size === 0}
+                disabled={selected.size === 0 || blocked}
                 loading={create.isPending}
                 onClick={() => create.mutate()}
+                title={
+                  blocked
+                    ? 'Resolve the blocking issues above, or untick those employees.'
+                    : undefined
+                }
               >
                 Create Payrun ({selected.size})
               </Button>

@@ -17,10 +17,13 @@ export class EmployeesService {
     departmentId?: string;
     employeeType?: string;
     isActive?: string;
+    /** "true" restricts the list to people who can be a manager. */
+    managersOnly?: string;
   }) {
     const where: Prisma.EmployeeWhereInput = {
       ...this.scope(user),
       departmentId: query.departmentId || undefined,
+      isManager: query.managersOnly === 'true' ? true : undefined,
       employeeType: (query.employeeType as any) || undefined,
       isActive: query.isActive === undefined ? undefined : query.isActive === 'true',
       ...(query.q
@@ -121,8 +124,34 @@ export class EmployeesService {
     return [...byType.values()];
   }
 
+  /**
+   * Reject obviously invalid phone numbers. The form checks this too, but the
+   * API is reachable directly, so the rule has to live here as well.
+   */
+  private assertPhoneValid(phone?: string | null) {
+    const raw = (phone ?? '').trim();
+    if (!raw) return;
+
+    // Strip an optional +91 country code, then require exactly 10 digits.
+    let digits = raw.replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2);
+
+    if (digits.length !== 10) {
+      throw new BadRequestException('Enter a 10-digit phone number.');
+    }
+    // The same digit ten times over, or a straight 0-9 run, is placeholder data.
+    const allSame = digits.split('').every((d) => d === digits[0]);
+    if (allSame || digits === '0123456789') {
+      throw new BadRequestException('That does not look like a real phone number.');
+    }
+    if (!/^[6-9]/.test(digits)) {
+      throw new BadRequestException('A mobile number starts with 6, 7, 8 or 9.');
+    }
+  }
+
   async create(input: any) {
     const data = this.sanitise(input);
+    this.assertPhoneValid(data.phone);
 
     if (!data.firstName || !data.lastName) {
       throw new BadRequestException('First name and last name are required.');
@@ -148,6 +177,7 @@ export class EmployeesService {
 
   async update(id: string, input: any) {
     const data = this.sanitise(input);
+    this.assertPhoneValid(data.phone);
 
     if (data.workEmail) await this.assertEmailFree(data.workEmail, id);
     if (data.managerId === id) {
@@ -203,6 +233,8 @@ export class EmployeesService {
     }
 
     if (input.employeeType !== undefined) data.employeeType = input.employeeType;
+    // Blank means "prefer not to say" rather than a null the column rejects.
+    if (input.gender !== undefined) data.gender = input.gender || 'UNDISCLOSED';
     if (input.isActive !== undefined) data.isActive = Boolean(input.isActive);
 
     // Required fields must not be nulled out by an edit.
@@ -249,7 +281,73 @@ export class EmployeesService {
     return this.prisma.department.findMany({ orderBy: { name: 'asc' } });
   }
 
+  /**
+   * Create a department on the fly, so HR is not blocked by a missing entry
+   * while filling in an employee form.
+   *
+   * The code is derived from the name (`Quality Assurance` -> `QUA`) because a
+   * short code is required but tedious to ask for; a numeric suffix is added if
+   * that code is already taken.
+   */
+  async createDepartment(input: { name?: string; code?: string; companyId?: string }) {
+    const name = (input.name ?? '').trim();
+    if (!name) throw new BadRequestException('A department name is required.');
+    if (name.length > 60) {
+      throw new BadRequestException('Department name is too long (60 characters max).');
+    }
+
+    // Case-insensitive duplicate check — "Finance" and "finance" are the same.
+    const clash = await this.prisma.department.findFirst({
+      where: { name: { equals: name, mode: 'insensitive' } },
+    });
+    if (clash) {
+      throw new BadRequestException(`A department called "${clash.name}" already exists.`);
+    }
+
+    const companyId =
+      input.companyId ?? (await this.prisma.company.findFirstOrThrow()).id;
+
+    return this.prisma.department.create({
+      data: { name, code: await this.nextDepartmentCode(input.code ?? name), companyId },
+    });
+  }
+
+  /** A unique short code, seeded from the name and suffixed on collision. */
+  private async nextDepartmentCode(seed: string): Promise<string> {
+    const base =
+      seed
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .slice(0, 4) || 'DEPT';
+
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const code = attempt === 0 ? base : `${base}${attempt + 1}`;
+      const taken = await this.prisma.department.findUnique({ where: { code } });
+      if (!taken) return code;
+    }
+    // Practically unreachable; keeps the return type honest.
+    return `${base}${Date.now().toString().slice(-4)}`;
+  }
+
   jobPositions() {
     return this.prisma.jobPosition.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  /** Create a job position inline, mirroring department creation. */
+  async createJobPosition(input: { name?: string }) {
+    const name = (input.name ?? '').trim();
+    if (!name) throw new BadRequestException('A job position name is required.');
+    if (name.length > 80) {
+      throw new BadRequestException('Job position name is too long (80 characters max).');
+    }
+
+    const clash = await this.prisma.jobPosition.findFirst({
+      where: { name: { equals: name, mode: 'insensitive' } },
+    });
+    if (clash) {
+      throw new BadRequestException(`A job position called "${clash.name}" already exists.`);
+    }
+
+    return this.prisma.jobPosition.create({ data: { name } });
   }
 }

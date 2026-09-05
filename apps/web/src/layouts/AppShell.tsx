@@ -37,7 +37,13 @@ const NAV: NavItem[] = [
       { label: 'Working Schedules', to: '/schedules' },
     ],
   },
-  { label: 'Attendance', to: '/attendance' },
+  {
+    label: 'Attendance',
+    children: [
+      { label: 'Attendance Log', to: '/attendance' },
+      { label: 'Attendance Requests', to: '/attendance/requests', roles: HR_ROLES },
+    ],
+  },
   {
     label: 'Time Off',
     children: [

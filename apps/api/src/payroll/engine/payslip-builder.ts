@@ -102,6 +102,7 @@ export class PayslipBuilder {
       leaveDays: timeData.leaveDays,
       unpaidLeaveDays: timeData.unpaidLeaveDays,
       overtimeHours: timeData.overtimeHours,
+      overtimeAmount: timeData.overtimeAmount,
     };
 
     // No contract → no numbers. Persist an empty payslip carrying the warning
@@ -198,9 +199,25 @@ export class PayslipBuilder {
     const workedDays = attendances.filter(
       (a) => a.status !== AttendanceStatus.ABSENT && Number(a.workedHours) > 0,
     ).length;
-    const overtimeHours = attendances
-      .filter((a) => a.status === AttendanceStatus.OVERTIME)
-      .reduce((sum, a) => sum + Math.max(0, Number(a.workedHours) - 8), 0);
+    // Only overtime HR actually approved is paid. An OVERTIME status alone is
+    // just a clock reading — without an approved request it earns nothing.
+    const approvedRequests = await this.prisma.attendanceRequest.findMany({
+      where: {
+        employeeId,
+        date: { gte: from, lte: to },
+        type: 'EXTRA_TIME',
+        state: 'APPROVED',
+      },
+      select: { deltaHours: true, approvedAmount: true },
+    });
+    const overtimeHours = approvedRequests.reduce(
+      (sum, r) => sum + Math.max(0, Number(r.deltaHours)),
+      0,
+    );
+    const overtimeAmount = approvedRequests.reduce(
+      (sum, r) => sum + Number(r.approvedAmount ?? 0),
+      0,
+    );
 
     const leaveDays = requests.reduce((sum, r) => sum + Number(r.duration), 0);
     const unpaidLeaveDays = requests
@@ -213,6 +230,7 @@ export class PayslipBuilder {
       leaveDays,
       unpaidLeaveDays,
       overtimeHours: Math.round(overtimeHours * 100) / 100,
+      overtimeAmount: Math.round(overtimeAmount * 100) / 100,
     };
   }
 

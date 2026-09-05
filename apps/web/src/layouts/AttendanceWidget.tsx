@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Button } from '../components/ui';
 import { api } from '../lib/api';
 import { cn, duration, time } from '../lib/format';
+import { AttendanceConfirmDialog, type CheckoutResult } from './AttendanceConfirmDialog';
 
 interface CurrentSession {
   checkedIn: boolean;
@@ -21,6 +22,8 @@ export function AttendanceWidget() {
   const queryClient = useQueryClient();
   const [open, setOpen] = React.useState(false);
   const [now, setNow] = React.useState(Date.now());
+  /** Set when a check-out came back off-target, which opens the dialog. */
+  const [confirming, setConfirming] = React.useState<CheckoutResult | null>(null);
   const anchor = React.useRef<HTMLDivElement>(null);
 
   const { data } = useQuery({
@@ -46,16 +49,24 @@ export function AttendanceWidget() {
   }, [open]);
 
   const toggle = useMutation({
-    mutationFn: () => api.post(data?.checkedIn ? '/attendance/check-out' : '/attendance/check-in'),
-    onSuccess: () => {
+    mutationFn: () =>
+      api.post<CheckoutResult | null>(
+        data?.checkedIn ? '/attendance/check-out' : '/attendance/check-in',
+      ),
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['attendance'] });
       setOpen(false);
+      // Exactly 8 hours passes silently; anything else asks for a reason.
+      // Only prompt for a genuinely fresh check-out. A day that already carries
+      // a request must never re-open the dialog on navigation.
+      if (result?.requiresConfirmation && !result.request) setConfirming(result);
     },
   });
 
   const checkedIn = Boolean(data?.checkedIn);
+  // Never negative: the server's clock can be marginally ahead of the browser.
   const elapsed = data?.session
-    ? Math.floor((now - new Date(data.session.checkIn).getTime()) / 60000)
+    ? Math.max(0, Math.floor((now - new Date(data.session.checkIn).getTime()) / 60000))
     : 0;
 
   return (
@@ -138,6 +149,13 @@ export function AttendanceWidget() {
             </p>
           )}
         </div>
+      )}
+
+      {confirming && (
+        <AttendanceConfirmDialog
+          result={confirming}
+          onClose={() => setConfirming(null)}
+        />
       )}
     </div>
   );

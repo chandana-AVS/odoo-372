@@ -41,6 +41,8 @@ export interface FormulaScope {
   leave_days: number;
   unpaid_leave_days: number;
   overtime_hours: number;
+  /** Approved overtime pay, already priced by HR. */
+  overtime_amount: number;
 }
 
 /**
@@ -70,6 +72,7 @@ function flatten(scope: FormulaScope): Record<string, number> {
     leave_days: scope.leave_days,
     unpaid_leave_days: scope.unpaid_leave_days,
     overtime_hours: scope.overtime_hours,
+    overtime_amount: scope.overtime_amount,
   };
   for (const [code, value] of Object.entries(scope.rules)) {
     flat[`rules_${code}`] = value;

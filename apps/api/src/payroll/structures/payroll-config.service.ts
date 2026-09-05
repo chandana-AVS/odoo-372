@@ -145,6 +145,7 @@ export class PayrollConfigService {
           leave_days: 0,
           unpaid_leave_days: 0,
           overtime_hours: 0,
+          overtime_amount: 0,
         });
       } catch (error: any) {
         throw new BadRequestException(error.message);

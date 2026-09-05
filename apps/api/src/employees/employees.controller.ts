@@ -12,9 +12,23 @@ export class EmployeesController {
     return this.employees.departments();
   }
 
+  /** Create a department inline from the employee form. */
+  @Roles(RoleName.HR_MANAGER, RoleName.HR_PAYROLL_USER, RoleName.HR_PAYROLL_MANAGER)
+  @Post('departments')
+  createDepartment(@Body() body: any) {
+    return this.employees.createDepartment(body);
+  }
+
   @Get('job-positions')
   jobPositions() {
     return this.employees.jobPositions();
+  }
+
+  /** Create a job position inline from the employee form. */
+  @Roles(RoleName.HR_MANAGER, RoleName.HR_PAYROLL_USER, RoleName.HR_PAYROLL_MANAGER)
+  @Post('job-positions')
+  createJobPosition(@Body() body: any) {
+    return this.employees.createJobPosition(body);
   }
 
   @Get('companies')

@@ -48,6 +48,19 @@ export class AuthService {
     );
   }
 
+  /**
+   * Headline counts for the login splash. Deliberately aggregate-only — this is
+   * served unauthenticated, so it must never expose anything about a person.
+   */
+  async publicStats() {
+    const [employees, salaryRules, payruns] = await Promise.all([
+      this.prisma.employee.count({ where: { isActive: true } }),
+      this.prisma.salaryRule.count(),
+      this.prisma.payrun.count(),
+    ]);
+    return { employees, salaryRules, payruns };
+  }
+
   static hash(password: string): Promise<string> {
     return bcrypt.hash(password, 10);
   }

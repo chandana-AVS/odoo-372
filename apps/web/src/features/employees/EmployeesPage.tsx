@@ -30,6 +30,8 @@ interface EmployeeRow {
   lastName: string;
   workEmail: string;
   employeeType: string;
+  gender?: 'MALE' | 'FEMALE' | 'OTHER' | 'UNDISCLOSED';
+  avatarUrl?: string | null;
   isActive: boolean;
   department: { id: string; name: string } | null;
   jobPosition: { name: string } | null;
@@ -184,6 +186,8 @@ export function EmployeesPage() {
                   <Avatar
                     firstName={employee.firstName}
                     lastName={employee.lastName}
+                    avatarUrl={employee.avatarUrl}
+                    gender={employee.gender}
                     size="lg"
                   />
                   <div className="min-w-0 flex-1">
@@ -238,6 +242,8 @@ export function EmployeesPage() {
                       <Avatar
                         firstName={employee.firstName}
                         lastName={employee.lastName}
+                        avatarUrl={employee.avatarUrl}
+                        gender={employee.gender}
                         size="sm"
                       />
                       <div className="min-w-0">

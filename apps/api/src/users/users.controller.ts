@@ -37,7 +37,14 @@ export class UsersController {
       },
       include: {
         roles: { include: { role: true } },
-        employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+        employee: { select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          code: true,
+          gender: true,
+          avatarUrl: true,
+        } },
       },
       orderBy: { email: 'asc' },
     });

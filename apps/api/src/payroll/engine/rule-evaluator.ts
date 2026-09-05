@@ -74,6 +74,7 @@ export function evaluateRules(input: EngineInput): ComputationResult {
     leave_days: input.leaveDays,
     unpaid_leave_days: input.unpaidLeaveDays,
     overtime_hours: input.overtimeHours,
+    overtime_amount: input.overtimeAmount,
   });
 
   for (const rule of ordered) {

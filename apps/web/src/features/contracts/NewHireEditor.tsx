@@ -1,16 +1,24 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, UserPlus } from 'lucide-react';
-import * as React from 'react';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, UserPlus } from "lucide-react";
+import * as React from "react";
 import {
   Button,
   Field,
   Input,
   Modal,
+  NumberInput,
+  PhoneInput,
   Select,
   Textarea,
-} from '../../components/ui';
-import { api } from '../../lib/api';
-import { money } from '../../lib/format';
+  TextInput,
+} from "../../components/ui";
+import { api } from "../../lib/api";
+import { money, phoneError } from "../../lib/format";
+import {
+  DepartmentSelect,
+  JobPositionSelect,
+} from "../employees/DepartmentSelect";
+import { ScheduleSelect } from "../schedules/ScheduleSelect";
 
 /**
  * Admin onboarding: creates the employee record AND their first contract in one
@@ -26,6 +34,7 @@ interface Values {
   phone: string;
   code: string;
   employeeType: string;
+  gender: string;
   workLocation: string;
   bankAccount: string;
   departmentId: string;
@@ -43,25 +52,26 @@ interface Values {
 }
 
 const EMPTY: Values = {
-  firstName: '',
-  lastName: '',
-  workEmail: '',
-  phone: '',
-  code: '',
-  employeeType: 'FULL_TIME',
-  workLocation: '',
-  bankAccount: '',
-  departmentId: '',
-  jobPositionId: '',
-  managerId: '',
-  workingScheduleId: '',
-  reference: '',
+  firstName: "",
+  lastName: "",
+  workEmail: "",
+  phone: "",
+  code: "",
+  employeeType: "FULL_TIME",
+  gender: "UNDISCLOSED",
+  workLocation: "",
+  bankAccount: "",
+  departmentId: "",
+  jobPositionId: "",
+  managerId: "",
+  workingScheduleId: "",
+  reference: "",
   startDate: new Date().toISOString().slice(0, 10),
-  endDate: '',
-  wage: '',
-  salaryStructureId: '',
-  status: 'RUNNING',
-  notes: '',
+  endDate: "",
+  wage: "",
+  salaryStructureId: "",
+  status: "RUNNING",
+  notes: "",
 };
 
 export function NewHireEditor({
@@ -87,53 +97,45 @@ export function NewHireEditor({
     });
   };
 
-  const departments = useQuery({
-    queryKey: ['departments'],
-    queryFn: () => api.get<any[]>('/departments'),
-  });
-  const positions = useQuery({
-    queryKey: ['job-positions'],
-    queryFn: () => api.get<any[]>('/job-positions'),
-  });
-  const schedules = useQuery({
-    queryKey: ['working-schedules'],
-    queryFn: () => api.get<any[]>('/working-schedules'),
-  });
   const structures = useQuery({
-    queryKey: ['salary-structures'],
-    queryFn: () => api.get<any[]>('/salary-structures'),
+    queryKey: ["salary-structures"],
+    queryFn: () => api.get<any[]>("/salary-structures"),
   });
+  // Only people flagged as managers — otherwise this lists the whole company.
   const managers = useQuery({
-    queryKey: ['employees'],
-    queryFn: () => api.get<any[]>('/employees'),
+    queryKey: ["employees", "managers"],
+    queryFn: () => api.get<any[]>("/employees?managersOnly=true"),
   });
 
-  // Default the pickers to the first option once the lists land.
+  // Default the salary structure once the list lands. The schedule picker
+  // manages its own options, so it is left for the user to choose.
   React.useEffect(() => {
-    if (!form.workingScheduleId && schedules.data?.length) {
-      set('workingScheduleId', schedules.data[0].id);
-    }
     if (!form.salaryStructureId && structures.data?.length) {
-      set('salaryStructureId', structures.data[0].id);
+      set("salaryStructureId", structures.data[0].id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedules.data, structures.data]);
+  }, [structures.data]);
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (!form.firstName.trim()) next.firstName = 'Required';
-    if (!form.lastName.trim()) next.lastName = 'Required';
-    if (!form.workEmail.trim()) next.workEmail = 'Required';
+    if (!form.firstName.trim()) next.firstName = "Required";
+    if (!form.lastName.trim()) next.lastName = "Required";
+    if (!form.workEmail.trim()) next.workEmail = "Required";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.workEmail.trim()))
-      next.workEmail = 'Enter a valid email address';
+      next.workEmail = "Enter a valid email address";
 
-    if (!form.wage.trim()) next.wage = 'Required';
-    else if (!(Number(form.wage) > 0)) next.wage = 'Enter an amount greater than zero';
+    const phoneProblem = phoneError(form.phone);
+    if (phoneProblem) next.phone = phoneProblem;
 
-    if (!form.startDate) next.startDate = 'Required';
+    if (!form.wage.trim()) next.wage = "Required";
+    else if (!(Number(form.wage) > 0))
+      next.wage = "Enter an amount greater than zero";
+
+    if (!form.startDate) next.startDate = "Required";
     if (form.endDate && form.endDate < form.startDate)
-      next.endDate = 'End date cannot precede the start date';
-    if (!form.salaryStructureId) next.salaryStructureId = 'Required — payroll cannot compute without one';
+      next.endDate = "End date cannot precede the start date";
+    if (!form.salaryStructureId)
+      next.salaryStructureId = "Required — payroll cannot compute without one";
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -144,13 +146,14 @@ export function NewHireEditor({
       // Step 1 — the person. Skipped if a previous attempt already made them.
       const employee =
         created ??
-        (await api.post<any>('/employees', {
+        (await api.post<any>("/employees", {
           firstName: form.firstName.trim(),
           lastName: form.lastName.trim(),
           workEmail: form.workEmail.trim(),
           phone: form.phone.trim() || undefined,
           code: form.code.trim() || undefined,
           employeeType: form.employeeType,
+          gender: form.gender,
           workLocation: form.workLocation.trim() || undefined,
           bankAccount: form.bankAccount.trim() || undefined,
           departmentId: form.departmentId || undefined,
@@ -162,7 +165,7 @@ export function NewHireEditor({
       setCreated(employee);
 
       // Step 2 — their contract.
-      const contract = await api.post<any>('/contracts', {
+      const contract = await api.post<any>("/contracts", {
         employeeId: employee.id,
         reference: form.reference.trim() || undefined,
         startDate: form.startDate,
@@ -170,8 +173,10 @@ export function NewHireEditor({
         wage: Number(form.wage),
         status: form.status,
         departmentId: form.departmentId || employee.departmentId || undefined,
-        jobPositionId: form.jobPositionId || employee.jobPositionId || undefined,
-        workingScheduleId: form.workingScheduleId || employee.workingScheduleId || undefined,
+        jobPositionId:
+          form.jobPositionId || employee.jobPositionId || undefined,
+        workingScheduleId:
+          form.workingScheduleId || employee.workingScheduleId || undefined,
         salaryStructureId: form.salaryStructureId,
         notes: form.notes.trim() || undefined,
       });
@@ -179,7 +184,7 @@ export function NewHireEditor({
       return { employee, contract };
     },
     onSuccess: ({ contract }) => {
-      for (const key of [['contracts'], ['employees'], ['dashboard']]) {
+      for (const key of [["contracts"], ["employees"], ["dashboard"]]) {
         queryClient.invalidateQueries({ queryKey: key });
       }
       onSaved?.(contract);
@@ -204,7 +209,7 @@ export function NewHireEditor({
         <>
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={save.isPending} onClick={submit}>
-            {created ? 'Retry contract' : 'Create employee & contract'}
+            {created ? "Retry contract" : "Create employee & contract"}
           </Button>
         </>
       }
@@ -223,9 +228,9 @@ export function NewHireEditor({
             <p>
               <span className="font-medium">
                 {created.firstName} {created.lastName} was created
-              </span>{' '}
-              ({created.code}), but the contract failed. Fix the contract details below and
-              retry — the employee will not be duplicated.
+              </span>{" "}
+              ({created.code}), but the contract failed. Fix the contract
+              details below and retry — the employee will not be duplicated.
             </p>
           </div>
         )}
@@ -238,16 +243,16 @@ export function NewHireEditor({
           </h3>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="First name" required error={errors.firstName}>
-              <Input
+              <TextInput
                 value={form.firstName}
-                onChange={(e) => set('firstName', e.target.value)}
+                onChange={(value) => set("firstName", value)}
                 placeholder="Aarav"
               />
             </Field>
             <Field label="Last name" required error={errors.lastName}>
-              <Input
+              <TextInput
                 value={form.lastName}
-                onChange={(e) => set('lastName', e.target.value)}
+                onChange={(value) => set("lastName", value)}
                 placeholder="Mehta"
               />
             </Field>
@@ -255,28 +260,39 @@ export function NewHireEditor({
               <Input
                 type="email"
                 value={form.workEmail}
-                onChange={(e) => set('workEmail', e.target.value)}
+                onChange={(e) => set("workEmail", e.target.value)}
                 placeholder="aarav.mehta@oxp.com"
               />
             </Field>
-            <Field label="Phone">
-              <Input
+            <Field label="Gender" hint="Sets the default avatar. Optional.">
+              <Select value={form.gender} onChange={(e) => set("gender", e.target.value)}>
+                <option value="UNDISCLOSED">Prefer not to say</option>
+                <option value="FEMALE">Female</option>
+                <option value="MALE">Male</option>
+                <option value="OTHER">Other</option>
+              </Select>
+            </Field>
+            <Field label="Phone" error={errors.phone}>
+              <PhoneInput
                 value={form.phone}
-                onChange={(e) => set('phone', e.target.value)}
+                onChange={(value) => set("phone", value)}
                 placeholder="+91 98765 43210"
               />
             </Field>
-            <Field label="Employee code" hint="Left blank, the server assigns the next one.">
+            <Field
+              label="Employee code"
+              hint="Left blank, the server assigns the next one."
+            >
               <Input
                 value={form.code}
-                onChange={(e) => set('code', e.target.value)}
-                placeholder="EMP0201"
+                onChange={(e) => set("code", e.target.value.toUpperCase())}
+                // placeholder="EMP0201"
               />
             </Field>
             <Field label="Employment type">
               <Select
                 value={form.employeeType}
-                onChange={(e) => set('employeeType', e.target.value)}
+                onChange={(e) => set("employeeType", e.target.value)}
               >
                 <option value="FULL_TIME">Full Time</option>
                 <option value="PART_TIME">Part Time</option>
@@ -285,47 +301,36 @@ export function NewHireEditor({
               </Select>
             </Field>
             <Field label="Department">
-              <Select
+              <DepartmentSelect
                 value={form.departmentId}
-                onChange={(e) => set('departmentId', e.target.value)}
-              >
-                <option value="">—</option>
-                {departments.data?.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={(id) => set("departmentId", id)}
+              />
             </Field>
             <Field label="Job position">
-              <Select
+              <JobPositionSelect
                 value={form.jobPositionId}
-                onChange={(e) => set('jobPositionId', e.target.value)}
-              >
-                <option value="">—</option>
-                {positions.data?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={(id) => set("jobPositionId", id)}
+              />
             </Field>
             <Field label="Manager">
-              <Select value={form.managerId} onChange={(e) => set('managerId', e.target.value)}>
+              <Select
+                value={form.managerId}
+                onChange={(e) => set("managerId", e.target.value)}
+              >
                 <option value="">—</option>
                 {managers.data?.map((m) => (
                   <option key={m.id} value={m.id}>
                     {/* Code disambiguates people who share a name. */}
                     {m.firstName} {m.lastName} · {m.code}
-                    {m.department?.name ? ` · ${m.department.name}` : ''}
+                    {m.department?.name ? ` · ${m.department.name}` : ""}
                   </option>
                 ))}
               </Select>
             </Field>
             <Field label="Work location">
-              <Input
+              <TextInput
                 value={form.workLocation}
-                onChange={(e) => set('workLocation', e.target.value)}
+                onChange={(value) => set("workLocation", value)}
                 placeholder="Mumbai"
               />
             </Field>
@@ -336,7 +341,7 @@ export function NewHireEditor({
             >
               <Input
                 value={form.bankAccount}
-                onChange={(e) => set('bankAccount', e.target.value)}
+                onChange={(e) => set("bankAccount", e.target.value)}
                 placeholder="IN6011000000"
               />
             </Field>
@@ -355,28 +360,21 @@ export function NewHireEditor({
             >
               <Input
                 value={form.reference}
-                onChange={(e) => set('reference', e.target.value)}
+                onChange={(e) => set("reference", e.target.value)}
                 placeholder="CON/2026/0201"
               />
             </Field>
             <Field label="Working schedule">
-              <Select
+              <ScheduleSelect
                 value={form.workingScheduleId}
-                onChange={(e) => set('workingScheduleId', e.target.value)}
-              >
-                <option value="">—</option>
-                {schedules.data?.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.hoursPerWeek}h/week)
-                  </option>
-                ))}
-              </Select>
+                onChange={(id) => set("workingScheduleId", id)}
+              />
             </Field>
             <Field label="Start date" required error={errors.startDate}>
               <Input
                 type="date"
                 value={form.startDate}
-                onChange={(e) => set('startDate', e.target.value)}
+                onChange={(e) => set("startDate", e.target.value)}
               />
             </Field>
             <Field
@@ -387,7 +385,7 @@ export function NewHireEditor({
               <Input
                 type="date"
                 value={form.endDate}
-                onChange={(e) => set('endDate', e.target.value)}
+                onChange={(e) => set("endDate", e.target.value)}
               />
             </Field>
             <Field
@@ -396,19 +394,20 @@ export function NewHireEditor({
               error={errors.wage}
               hint={wagePreview ? `${wagePreview} per month` : undefined}
             >
-              <Input
-                type="number"
-                min={0}
-                step={1000}
+              <NumberInput
                 value={form.wage}
-                onChange={(e) => set('wage', e.target.value)}
+                onChange={(value) => set("wage", value)}
                 placeholder="75000"
               />
             </Field>
-            <Field label="Salary structure" required error={errors.salaryStructureId}>
+            <Field
+              label="Salary structure"
+              required
+              error={errors.salaryStructureId}
+            >
               <Select
                 value={form.salaryStructureId}
-                onChange={(e) => set('salaryStructureId', e.target.value)}
+                onChange={(e) => set("salaryStructureId", e.target.value)}
               >
                 <option value="">—</option>
                 {structures.data?.map((s) => (
@@ -422,7 +421,10 @@ export function NewHireEditor({
               label="Status"
               hint="Running contracts drive payroll; only one may run at a time."
             >
-              <Select value={form.status} onChange={(e) => set('status', e.target.value)}>
+              <Select
+                value={form.status}
+                onChange={(e) => set("status", e.target.value)}
+              >
                 <option value="RUNNING">Running</option>
                 <option value="DRAFT">Draft</option>
               </Select>
@@ -430,7 +432,7 @@ export function NewHireEditor({
             <Field label="Notes" className="sm:col-span-2">
               <Textarea
                 value={form.notes}
-                onChange={(e) => set('notes', e.target.value)}
+                onChange={(e) => set("notes", e.target.value)}
                 placeholder="Anything worth recording about these terms."
               />
             </Field>

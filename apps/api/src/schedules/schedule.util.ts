@@ -16,8 +16,11 @@ function toMinutes(hhmm: string): number {
  */
 export function scheduleHoursPerWeek(lines: ScheduleLineLike[]): number {
   const minutes = lines.reduce((sum, line) => {
-    const span = toMinutes(line.endTime) - toMinutes(line.startTime) - (line.breakMinutes || 0);
-    return sum + Math.max(0, span);
+    let span = toMinutes(line.endTime) - toMinutes(line.startTime);
+    // A night shift ends the NEXT day (20:00 -> 04:00), so the raw difference
+    // is negative. Roll it over instead of clamping it away to zero.
+    if (span <= 0) span += 24 * 60;
+    return sum + Math.max(0, span - (line.breakMinutes || 0));
   }, 0);
   return Math.round((minutes / 60) * 100) / 100;
 }

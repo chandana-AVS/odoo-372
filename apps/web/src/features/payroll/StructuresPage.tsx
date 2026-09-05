@@ -14,6 +14,7 @@ import {
   LoadingBlock,
   Modal,
   NoResults,
+  NumberInput,
   PageHeader,
   ReadField,
   SearchInput,
@@ -375,10 +376,9 @@ function RuleEditor({
             </Select>
           </Field>
           <Field label="Sequence" required hint="Lower runs first.">
-            <Input
-              type="number"
+            <NumberInput
               value={form.sequence}
-              onChange={(e) => set({ sequence: Number(e.target.value) })}
+              onChange={(value) => set({ sequence: value === '' ? 0 : Number(value) })}
             />
           </Field>
         </div>
@@ -396,10 +396,10 @@ function RuleEditor({
 
         {form.computationType === 'FIXED' && (
           <Field label="Amount" required>
-            <Input
-              type="number"
+            <NumberInput
+              decimal
               value={form.amountFixed}
-              onChange={(e) => set({ amountFixed: e.target.value })}
+              onChange={(value) => set({ amountFixed: value })}
             />
           </Field>
         )}
@@ -407,11 +407,10 @@ function RuleEditor({
         {form.computationType === 'PERCENTAGE' && (
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Percentage" required>
-              <Input
-                type="number"
-                step="0.01"
+              <NumberInput
+                decimal
                 value={form.percentage}
-                onChange={(e) => set({ percentage: e.target.value })}
+                onChange={(value) => set({ percentage: value })}
               />
             </Field>
             <Field label="Of" required>

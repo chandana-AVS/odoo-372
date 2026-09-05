@@ -22,6 +22,13 @@ export class AuthController {
     return this.auth.login(dto.email, dto.password);
   }
 
+  /** Aggregate counts for the login page. No authentication required. */
+  @Public()
+  @Get('stats')
+  stats() {
+    return this.auth.publicStats();
+  }
+
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user.id);

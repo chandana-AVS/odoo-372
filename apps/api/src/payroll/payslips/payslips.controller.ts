@@ -26,7 +26,14 @@ export class PayslipsController {
         state: query.state || undefined,
       },
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+        employee: { select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          code: true,
+          gender: true,
+          avatarUrl: true,
+        } },
         payrun: { select: { id: true, name: true } },
         salaryStructure: { select: { name: true } },
       },

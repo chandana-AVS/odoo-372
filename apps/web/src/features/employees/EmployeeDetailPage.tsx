@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays, Clock, FileText, Pencil, Wallet } from 'lucide-react';
+import { CalendarDays, Clock, Pencil, Wallet } from 'lucide-react';
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
@@ -81,7 +81,13 @@ export function EmployeeDetailPage() {
         }
         title={
           <span className="flex items-center gap-3">
-            <Avatar firstName={e.firstName} lastName={e.lastName} size="lg" />
+            <Avatar
+              firstName={e.firstName}
+              lastName={e.lastName}
+              avatarUrl={e.avatarUrl}
+              gender={e.gender}
+              size="lg"
+            />
             <span className="min-w-0">
               <span className="block truncate">
                 {e.firstName} {e.lastName}
@@ -108,13 +114,7 @@ export function EmployeeDetailPage() {
       />
 
       {/* Smart buttons — counts open filtered child views */}
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SmartButton
-          icon={FileText}
-          label="Contracts"
-          count={s?.contracts ?? 0}
-          to={`/contracts?employeeId=${id}`}
-        />
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <SmartButton
           icon={Clock}
           label="Attendance"

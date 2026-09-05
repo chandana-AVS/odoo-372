@@ -1,6 +1,7 @@
 import { AlertTriangle, Check, Inbox, Loader2, Search, SearchX, X } from 'lucide-react';
 import * as React from 'react';
 import { avatarTint, cn, initials } from '../lib/format';
+import { FemaleAvatarIcon, MaleAvatarIcon } from './AvatarIcons';
 
 /* -------------------------------------------------------------------------- */
 /* Button                                                                      */
@@ -143,6 +144,8 @@ export function Badge({
 /** Maps every workflow state in the app to a consistent colour. */
 const STATE_TONES: Record<string, BadgeTone> = {
   DRAFT: 'neutral',
+  PENDING: 'warn',
+  REJECTED: 'danger',
   SUBMITTED: 'info',
   COMPUTED: 'info',
   VALIDATED: 'brand',
@@ -255,16 +258,41 @@ export function ReadField({
 /* Avatar                                                                      */
 /* -------------------------------------------------------------------------- */
 
+export type Gender = 'MALE' | 'FEMALE' | 'OTHER' | 'UNDISCLOSED';
+
+/**
+ * Default avatar art, chosen by gender. The icons themselves live in
+ * `AvatarIcons.tsx` — see that file for provenance.
+ */
+function GenderGlyph({ gender }: { gender: Gender }) {
+  if (gender === 'FEMALE') return <FemaleAvatarIcon className="h-full w-full" />;
+  if (gender === 'MALE') return <MaleAvatarIcon className="h-full w-full" />;
+
+  // OTHER / UNDISCLOSED: a neutral figure, never a gendered guess.
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-[58%] w-[58%]" aria-hidden>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M12 13.5c3.3 0 6 2 6 4.5V21H6v-3c0-2.5 2.7-4.5 6-4.5Z" />
+    </svg>
+  );
+}
+
 export function Avatar({
   firstName,
   lastName,
   size = 'md',
   className,
+  /** A photo takes precedence over everything else. */
+  avatarUrl,
+  /** Chooses the fallback silhouette when there is no photo. */
+  gender,
 }: {
   firstName?: string;
   lastName?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
+  avatarUrl?: string | null;
+  gender?: Gender | null;
 }) {
   const sizes = {
     sm: 'h-7 w-7 text-[10px]',
@@ -273,16 +301,37 @@ export function Avatar({
     xl: 'h-16 w-16 text-lg',
   };
   const seed = `${firstName ?? ''}${lastName ?? ''}`;
+  const shell = cn(
+    'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold',
+    sizes[size],
+    className,
+  );
+
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={`${firstName ?? ''} ${lastName ?? ''}`.trim() || 'Employee'}
+        className={cn(shell, 'object-cover')}
+      />
+    );
+  }
+
+  // A stated gender gets its illustrated avatar. These are full-colour icons,
+  // so they sit on a plain neutral disc rather than a tinted one.
+  if (gender === 'MALE' || gender === 'FEMALE') {
+    return (
+      <span className={cn(shell, 'bg-elevated')}>
+        <GenderGlyph gender={gender} />
+      </span>
+    );
+  }
+
+  // Otherwise initials, which identify the person better than a silhouette.
+  const hasName = Boolean(seed.trim());
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-full font-semibold',
-        sizes[size],
-        avatarTint(seed || 'x'),
-        className,
-      )}
-    >
-      {initials(firstName, lastName)}
+    <span className={cn(shell, avatarTint(seed || 'x'))}>
+      {hasName ? initials(firstName, lastName) : <GenderGlyph gender="UNDISCLOSED" />}
     </span>
   );
 }
@@ -690,3 +739,166 @@ export function NoResults({
     />
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* NumberInput — digits only, no stray characters                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A numeric field that genuinely refuses non-numeric input.
+ *
+ * `<input type="number">` alone is not enough: browsers still accept `e`, `+`,
+ * `-` and `.` keystrokes, and a pasted "abc" silently yields an empty value with
+ * no feedback. This keeps the value as a string the caller controls, filters at
+ * the source, and blocks the scroll-wheel gesture that otherwise changes numbers
+ * when a user simply scrolls the page.
+ */
+export const NumberInput = React.forwardRef<
+  HTMLInputElement,
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'type'> & {
+    value: string | number;
+    onChange: (value: string) => void;
+    /** Allow a decimal point. Off by default — most money fields here are whole. */
+    decimal?: boolean;
+    /** Allow a leading minus. Off by default. */
+    allowNegative?: boolean;
+  }
+>(({ className, value, onChange, decimal, allowNegative, ...props }, ref) => {
+  const clean = (raw: string) => {
+    let out = raw.replace(decimal ? /[^\d.]/g : /\D/g, '');
+    if (decimal) {
+      // Keep only the first decimal point.
+      const [head, ...rest] = out.split('.');
+      out = rest.length ? `${head}.${rest.join('')}` : head;
+    }
+    if (allowNegative && raw.trimStart().startsWith('-')) out = `-${out}`;
+    return out;
+  };
+
+  return (
+    <input
+      {...props}
+      ref={ref}
+      type="text"
+      inputMode={decimal ? 'decimal' : 'numeric'}
+      value={String(value ?? '')}
+      onChange={(e) => onChange(clean(e.target.value))}
+      onKeyDown={(e) => {
+        // Let navigation and shortcuts through; block character keys.
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+          const ok =
+            /\d/.test(e.key) ||
+            (decimal && e.key === '.') ||
+            (allowNegative && e.key === '-');
+          if (!ok) e.preventDefault();
+        }
+      }}
+      onWheel={(e) => e.currentTarget.blur()}
+      onPaste={(e) => {
+        const text = e.clipboardData.getData('text');
+        if (clean(text) !== text) {
+          e.preventDefault();
+          onChange(clean(text));
+        }
+      }}
+      className={cn(fieldClass, 'h-9 tabular', className)}
+    />
+  );
+});
+NumberInput.displayName = 'NumberInput';
+
+/* -------------------------------------------------------------------------- */
+/* PhoneInput — digits, spaces and the usual dialling punctuation only         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A phone field. Letters are refused outright; `+`, spaces, hyphens and
+ * parentheses are kept because real numbers are written with them
+ * (`+91 98765 43210`, `(020) 7946-0958`).
+ */
+export const PhoneInput = React.forwardRef<
+  HTMLInputElement,
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'type'> & {
+    value: string;
+    onChange: (value: string) => void;
+  }
+>(({ className, value, onChange, ...props }, ref) => {
+  // A leading + is valid; anywhere else it is not.
+  const clean = (raw: string) => {
+    const plus = raw.trimStart().startsWith('+');
+    const rest = raw.replace(/[^\d\s()-]/g, '');
+    return (plus ? '+' : '') + rest;
+  };
+
+  return (
+    <input
+      {...props}
+      ref={ref}
+      type="tel"
+      inputMode="tel"
+      value={value ?? ''}
+      onChange={(e) => onChange(clean(e.target.value))}
+      onKeyDown={(e) => {
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+          const atStart = e.currentTarget.selectionStart === 0;
+          const ok = /[\d\s()-]/.test(e.key) || (e.key === '+' && atStart);
+          if (!ok) e.preventDefault();
+        }
+      }}
+      onPaste={(e) => {
+        const text = e.clipboardData.getData('text');
+        if (clean(text) !== text) {
+          e.preventDefault();
+          onChange(clean(text));
+        }
+      }}
+      className={cn(fieldClass, 'h-9 tabular', className)}
+    />
+  );
+});
+PhoneInput.displayName = 'PhoneInput';
+
+/* -------------------------------------------------------------------------- */
+/* TextInput — letters only, for names and other word-shaped fields            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A field that refuses digits. Apostrophes, hyphens, full stops and spaces stay
+ * allowed, because real names contain them (`O'Neill`, `Jean-Luc`, `St. John`).
+ * Accented and non-Latin letters are preserved — never assume names are ASCII.
+ */
+export const TextInput = React.forwardRef<
+  HTMLInputElement,
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> & {
+    value: string;
+    onChange: (value: string) => void;
+  }
+>(({ className, value, onChange, onKeyDown, ...props }, ref) => {
+  const clean = (raw: string) => raw.replace(/[0-9]/g, '');
+
+  return (
+    <input
+      {...props}
+      ref={ref}
+      type="text"
+      value={value ?? ''}
+      onChange={(e) => onChange(clean(e.target.value))}
+      onKeyDown={(e) => {
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && /[0-9]/.test(e.key)) {
+          e.preventDefault();
+        }
+        // Run the caller's handler too — it would otherwise be shadowed.
+        onKeyDown?.(e);
+      }}
+      onPaste={(e) => {
+        const text = e.clipboardData.getData('text');
+        if (clean(text) !== text) {
+          e.preventDefault();
+          onChange(clean(text));
+        }
+      }}
+      className={cn(fieldClass, 'h-9', className)}
+    />
+  );
+});
+TextInput.displayName = 'TextInput';

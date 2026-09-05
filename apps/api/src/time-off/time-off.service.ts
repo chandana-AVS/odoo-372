@@ -1,7 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AllocationState, Prisma, TimeOffState } from '@prisma/client';
+import { AllocationState, Prisma, RoleName, TimeOffState } from '@prisma/client';
 import { AuthUser, canSeeAllRecords } from '../common/decorators';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  assertCanDecide,
+  hrStaffEmployeeIds,
+  isHrStaff,
+} from '../common/approval-policy';
 
 @Injectable()
 export class TimeOffService {
@@ -33,7 +38,14 @@ export class TimeOffService {
         state: (query.state as AllocationState) || undefined,
       },
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+        employee: { select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          code: true,
+          gender: true,
+          avatarUrl: true,
+        } },
         type: true,
         _count: { select: { requests: true } },
       },
@@ -83,21 +95,35 @@ export class TimeOffService {
   }
 
   // ----------------------------------------------------------- requests
-  listRequests(user: AuthUser, query: { employeeId?: string; state?: string }) {
+  async listRequests(user: AuthUser, query: { employeeId?: string; state?: string }) {
+    // HR-raised leave escalates to an admin, so it is hidden from HR reviewers.
+    const hideHrRaised =
+      !user.roles.includes(RoleName.ADMIN) && isHrStaff(user.roles) && !query.employeeId;
+    const excludeIds = hideHrRaised ? await hrStaffEmployeeIds(this.prisma) : [];
+
     return this.prisma.timeOffRequest.findMany({
       where: {
         employeeId: canSeeAllRecords(user)
-          ? query.employeeId || undefined
+          ? query.employeeId || (excludeIds.length ? { notIn: excludeIds } : undefined)
           : user.employeeId ?? '__none__',
         state: (query.state as TimeOffState) || undefined,
       },
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+        employee: { select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          code: true,
+          gender: true,
+          avatarUrl: true,
+        } },
         type: true,
         allocation: { select: { id: true, allocatedQty: true, takenQty: true } },
         approvedBy: { select: { email: true } },
       },
-      orderBy: { dateFrom: 'desc' },
+      // Newest submission first, so a request just raised appears at the top
+      // even when its leave dates are in the past.
+      orderBy: [{ createdAt: 'desc' }, { dateFrom: 'desc' }],
     });
   }
 
@@ -135,6 +161,18 @@ export class TimeOffService {
   }
 
   /**
+   * Roles held by the person a request belongs to. Drives the escalation rule:
+   * an HR member's own request can only be decided by an admin.
+   */
+  private async rolesOfEmployee(employeeId: string): Promise<RoleName[]> {
+    const account = await this.prisma.user.findUnique({
+      where: { employeeId },
+      include: { roles: { include: { role: true } } },
+    });
+    return (account?.roles ?? []).map((ur) => ur.role.name);
+  }
+
+  /**
    * INVARIANT I3 — approving a request consumes allocation balance, in one
    * transaction, and refuses to let the balance go negative.
    */
@@ -148,6 +186,14 @@ export class TimeOffService {
       if (request.state === TimeOffState.APPROVED) {
         throw new BadRequestException('Request is already approved.');
       }
+
+      // Nobody signs off their own leave, and HR's own leave escalates to admin.
+      assertCanDecide({
+        decider: user,
+        requesterEmployeeId: request.employeeId,
+        requesterRoles: await this.rolesOfEmployee(request.employeeId),
+        subject: 'leave request',
+      });
 
       let allocationId: string | null = null;
 
@@ -200,7 +246,18 @@ export class TimeOffService {
     });
   }
 
-  refuseRequest(user: AuthUser, id: string, reason?: string) {
+  async refuseRequest(user: AuthUser, id: string, reason?: string) {
+    const existing = await this.prisma.timeOffRequest.findUniqueOrThrow({
+      where: { id },
+      select: { employeeId: true },
+    });
+    assertCanDecide({
+      decider: user,
+      requesterEmployeeId: existing.employeeId,
+      requesterRoles: await this.rolesOfEmployee(existing.employeeId),
+      subject: 'leave request',
+    });
+
     return this.prisma.timeOffRequest.update({
       where: { id },
       data: {

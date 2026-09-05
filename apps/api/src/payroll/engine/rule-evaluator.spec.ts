@@ -104,6 +104,7 @@ const input = (rules: EngineRule[], wage = 100000): EngineInput => ({
   leaveDays: 0,
   unpaidLeaveDays: 0,
   overtimeHours: 0,
+  overtimeAmount: 0,
 });
 
 describe('rule evaluator', () => {

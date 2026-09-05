@@ -41,6 +41,13 @@ enum CalendarType {
   PART_TIME
 }
 
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
 enum AttendanceStatus {
   PRESENT
   LATE
@@ -141,6 +148,7 @@ model User {
   approvedRequests    TimeOffRequest[]    @relation("RequestApprover")
   approvedAllocations TimeOffAllocation[] @relation("AllocationApprover")
   editedAttendances   Attendance[]        @relation("AttendanceEditor")
+  decidedAttendanceRequests AttendanceRequest[] @relation("AttendanceRequestDecider")
   createdPayruns      Payrun[]            @relation("PayrunCreator")
 
   @@index([email])
@@ -197,6 +205,9 @@ model Employee {
   personalEmail String?
   phone         String?
   avatarUrl     String?
+  /// Drives the default avatar when no avatarUrl is set. Optional by design —
+  /// nobody should be forced to disclose it.
+  gender        Gender    @default(UNDISCLOSED)
   workLocation  String?
   employeeType  EmployeeType @default(FULL_TIME)
 
@@ -225,7 +236,12 @@ model Employee {
 
   user        User?
   contracts   Contract[]
-  attendances Attendance[]
+  /// Marks someone who can be picked as another employee's manager. Without
+  /// this the manager dropdown lists the entire company.
+  isManager Boolean @default(false)
+
+  attendances        Attendance[]
+  attendanceRequests AttendanceRequest[]
   requests    TimeOffRequest[]
   allocations TimeOffAllocation[]
   payslips    Payslip[]
@@ -327,9 +343,61 @@ model Attendance {
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   editedBy User?    @relation("AttendanceEditor", fields: [editedById], references: [id])
+  request  AttendanceRequest?
 
   @@index([employeeId, date])
   @@index([date])
+}
+
+/// Raised when a day's worked time differs from the contracted 8 hours.
+/// The employee picks a type, gives a reason, and the request moves through
+/// review. Stored separately from Attendance so the raw clock data stays
+/// immutable and the request keeps its own audit trail.
+model AttendanceRequest {
+  id           String                  @id @default(cuid())
+  attendanceId String                  @unique
+  employeeId   String
+  date         DateTime                @db.Date
+  /// Hours actually worked on the day, captured at submission time.
+  workedHours  Decimal                 @db.Decimal(6, 2)
+  /// Signed difference from the 8-hour baseline: +1.50 = 1h30m extra.
+  deltaHours   Decimal                 @db.Decimal(6, 2)
+  type         AttendanceRequestType
+  reason       String
+  state        AttendanceRequestState  @default(PENDING)
+
+  /// True when the day fell on a Saturday or Sunday — weekend overtime is paid
+  /// at a higher multiplier than weekday overtime.
+  isWeekend    Boolean                 @default(false)
+  /// Overtime amount HR approved for this request, in currency. Written when
+  /// the request is approved so payroll never recomputes a settled figure.
+  approvedAmount Decimal?              @db.Decimal(12, 2)
+
+  /// Set when the request reaches a terminal state.
+  decidedById  String?
+  decidedAt    DateTime?
+  decisionNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  decidedBy  User?      @relation("AttendanceRequestDecider", fields: [decidedById], references: [id])
+
+  @@index([employeeId, date])
+  @@index([state])
+}
+
+enum AttendanceRequestType {
+  EXTRA_TIME
+  EARLY_LOGOUT
+}
+
+enum AttendanceRequestState {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 // ---------------------------------------------------------------------------

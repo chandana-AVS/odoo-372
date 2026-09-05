@@ -78,6 +78,36 @@ export class WarningCollector {
       );
     }
 
+    // Another active record that looks like the same person. Paying both is a
+    // real risk, so this blocks rather than merely warns.
+    const twin = await this.prisma.employee.findFirst({
+      where: {
+        id: { not: employee.id },
+        isActive: true,
+        OR: [
+          {
+            firstName: { equals: employee.firstName, mode: 'insensitive' },
+            lastName: { equals: employee.lastName, mode: 'insensitive' },
+          },
+          ...(employee.bankAccount?.trim()
+            ? [{ bankAccount: employee.bankAccount.trim() }]
+            : []),
+        ],
+      },
+      select: { code: true, firstName: true, lastName: true, bankAccount: true },
+    });
+    if (twin) {
+      const sameBank =
+        Boolean(employee.bankAccount?.trim()) &&
+        twin.bankAccount?.trim() === employee.bankAccount?.trim();
+      at(
+        'DUPLICATE_EMPLOYEE',
+        'blocking',
+        `${employee.firstName} ${employee.lastName} may be a duplicate of ${twin.code} ` +
+          `(${sameBank ? 'same bank account' : 'same name'}). Merge or archive one before paying.`,
+      );
+    }
+
     if (net < 0) {
       at('NEGATIVE_NET', 'blocking', `Computed net salary is negative (${net}).`);
     }

@@ -142,6 +142,8 @@ export function TimeOffRequestsPage() {
                       <Avatar
                         firstName={request.employee.firstName}
                         lastName={request.employee.lastName}
+                        avatarUrl={request.employee.avatarUrl}
+                        gender={request.employee.gender}
                         size="sm"
                       />
                       <span className="truncate">
@@ -418,6 +420,8 @@ export function AllocationsPage() {
                         <Avatar
                           firstName={allocation.employee.firstName}
                           lastName={allocation.employee.lastName}
+                          avatarUrl={allocation.employee.avatarUrl}
+                          gender={allocation.employee.gender}
                           size="sm"
                         />
                         <span className="truncate">

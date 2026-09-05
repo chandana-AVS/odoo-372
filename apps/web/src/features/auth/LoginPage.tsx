@@ -1,7 +1,9 @@
+import { useQuery } from '@tanstack/react-query';
 import { LayoutGrid } from 'lucide-react';
 import * as React from 'react';
 import { Navigate } from 'react-router-dom';
 import { Button, Field, Input } from '../../components/ui';
+import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 
 const DEMO_ACCOUNTS = [
@@ -18,6 +20,15 @@ export function LoginPage() {
   const [password, setPassword] = React.useState('password123');
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+
+  // Live headline counts — hardcoding these left them stale as the data grew.
+  const stats = useQuery({
+    queryKey: ['auth', 'stats'],
+    queryFn: () =>
+      api.get<{ employees: number; salaryRules: number; payruns: number }>('/auth/stats'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 
   if (user) return <Navigate to="/" replace />;
 
@@ -130,12 +141,12 @@ export function LoginPage() {
 
           <dl className="mt-12 grid max-w-md grid-cols-3 gap-6">
             {[
-              ['22', 'Employees'],
-              ['7', 'Salary rules'],
-              ['3', 'Months of history'],
+              [stats.data?.employees, 'Employees'],
+              [stats.data?.salaryRules, 'Salary rules'],
+              [stats.data?.payruns, 'Payruns'],
             ].map(([value, label]) => (
               <div key={label}>
-                <dt className="text-2xl font-semibold tabular">{value}</dt>
+                <dt className="text-2xl font-semibold tabular">{value ?? '—'}</dt>
                 <dd className="mt-0.5 text-xs opacity-75">{label}</dd>
               </div>
             ))}

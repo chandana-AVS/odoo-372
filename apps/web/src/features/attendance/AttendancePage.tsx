@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { Clock, PencilLine } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, PencilLine, Plus } from "lucide-react";
 import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Avatar,
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorBlock,
@@ -14,18 +15,26 @@ import {
   PageHeader,
   SearchInput,
   StateBadge,
+  Tabs,
   Td,
   Th,
   TableWrap,
   Tr,
 } from "../../components/ui";
 import { api, qs } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
 import { duration, shortDate, time } from "../../lib/format";
 import { useSearch } from "../../lib/search";
+import { MyRequestsTable } from "./MyRequestsTable";
+import { NewRequestPicker } from "./NewRequestPicker";
 
 export function AttendancePage() {
   const [params] = useSearchParams();
   const employeeId = params.get("employeeId") ?? "";
+  const { user } = useAuth();
+  const [tab, setTab] = React.useState<"log" | "requests">("log");
+  const [raising, setRaising] = React.useState(false);
+  const mine = employeeId || user?.employeeId || "";
 
   const [from, setFrom] = React.useState(() => {
     const date = new Date();
@@ -37,13 +46,27 @@ export function AttendancePage() {
   );
 
   const [q, setQ] = React.useState("");
+  const [page, setPage] = React.useState(1);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["attendance", employeeId, from, to],
-    queryFn: () => api.get<any[]>(`/attendance${qs({ employeeId, from, to })}`),
+    queryKey: ["attendance", employeeId, from, to, page],
+    queryFn: () =>
+      api.get<{
+        rows: any[];
+        total: number;
+        page: number;
+        pageSize: number;
+        pageCount: number;
+      }>(`/attendance${qs({ employeeId, from, to, page })}`),
+    placeholderData: (previous) => previous,
   });
 
-  const filtered = useSearch(data, q, (row) => [
+  const rows = data?.rows ?? [];
+
+  // Filters and date changes invalidate the current page number.
+  React.useEffect(() => setPage(1), [employeeId, from, to, q]);
+
+  const filtered = useSearch(rows, q, (row) => [
     row.employee,
     row.status,
     shortDate(row.date),
@@ -78,6 +101,14 @@ export function AttendancePage() {
         }
         action={
           <div className="flex flex-wrap items-center gap-2">
+            {mine && (
+              <Button variant="primary" onClick={() => setRaising(true)}>
+                <Plus className="h-3.5 w-3.5" />
+                New Request
+              </Button>
+            )}
+            {tab === "log" && (
+            <>
             <SearchInput
               value={q}
               onChange={setQ}
@@ -98,10 +129,29 @@ export function AttendancePage() {
               onChange={(e) => setTo(e.target.value)}
               className="w-36"
             />
+            </>
+            )}
           </div>
         }
       />
 
+      <Tabs
+        value={tab}
+        onChange={(value) => setTab(value as "log" | "requests")}
+        tabs={[
+          { value: "log", label: "Attendance Log" },
+          { value: "requests", label: "My Requests" },
+        ]}
+      />
+
+      {tab === "requests" && (
+        <div className="mt-5">
+          <MyRequestsTable employeeId={mine} />
+        </div>
+      )}
+
+      {tab === "log" && (
+      <>
       {/* Quick stats */}
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
@@ -124,7 +174,7 @@ export function AttendancePage() {
       {error && <ErrorBlock error={error} />}
       {isLoading && <LoadingBlock rows={8} />}
 
-      {data && data.length === 0 && (
+      {data && rows.length === 0 && (
         <Card>
           <EmptyState
             icon={Clock}
@@ -134,7 +184,7 @@ export function AttendancePage() {
         </Card>
       )}
 
-      {data && data.length > 0 && filtered.length === 0 && (
+      {data && rows.length > 0 && filtered.length === 0 && (
         <Card>
           <NoResults query={q} onClear={() => setQ("")} noun="entries" />
         </Card>
@@ -161,6 +211,8 @@ export function AttendancePage() {
                       <Avatar
                         firstName={row.employee.firstName}
                         lastName={row.employee.lastName}
+                        avatarUrl={row.employee.avatarUrl}
+                        gender={row.employee.gender}
                         size="sm"
                       />
                       <span className="truncate">
@@ -196,7 +248,55 @@ export function AttendancePage() {
               ))}
             </tbody>
           </TableWrap>
+
+          {/* Pager — 50 rows a page, so a month of data stays readable. */}
+          {data && data.pageCount > 1 && (
+            <div className="flex flex-col gap-2 border-t border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted">
+                Showing{" "}
+                <span className="font-medium text-ink tabular">
+                  {(data.page - 1) * data.pageSize + 1}–
+                  {Math.min(data.page * data.pageSize, data.total)}
+                </span>{" "}
+                of <span className="font-medium text-ink tabular">{data.total}</span> entries
+                {q && " (search filters this page)"}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  disabled={data.page <= 1}
+                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Previous
+                </Button>
+                <span className="tabular text-xs text-muted">
+                  Page {data.page} of {data.pageCount}
+                </span>
+                <Button
+                  size="sm"
+                  disabled={data.page >= data.pageCount}
+                  onClick={() => setPage((p) => Math.min(p + 1, data.pageCount))}
+                >
+                  Next
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
+      )}
+      </>
+      )}
+
+      {raising && (
+        <NewRequestPicker
+          employeeId={mine}
+          onClose={() => {
+            setRaising(false);
+            setTab("requests");
+          }}
+        />
       )}
     </>
   );

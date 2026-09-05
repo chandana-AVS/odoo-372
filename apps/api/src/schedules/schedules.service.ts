@@ -39,11 +39,15 @@ export class SchedulesService {
   }
 
   async create(data: any) {
+    // The form does not ask for a company, so fall back to the only one.
+    const companyId =
+      data.companyId ?? (await this.prisma.company.findFirstOrThrow()).id;
+
     const created = await this.prisma.workingSchedule.create({
       data: {
         name: data.name,
         calendarType: data.calendarType ?? 'FULL_TIME',
-        companyId: data.companyId,
+        companyId,
         lines: { create: (data.lines ?? []).map(this.lineInput) },
       },
       include: { lines: true },

@@ -53,6 +53,13 @@
     -webkit-text-size-adjust: 100%;
   }
 
+  html {
+    /* Reserve the scrollbar track permanently. Modals and dropdowns set
+       `overflow: hidden` on the body while open; without a reserved gutter the
+       scrollbar vanishes and the whole page jumps sideways as it opens. */
+    scrollbar-gutter: stable;
+  }
+
   body {
     @apply bg-bg text-ink antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';

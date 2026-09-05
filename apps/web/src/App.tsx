@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Card, EmptyState, Spinner } from './components/ui';
 import { AttendancePage } from './features/attendance/AttendancePage';
+import { AttendanceRequestsPage } from './features/attendance/AttendanceRequestsPage';
 import { LoginPage } from './features/auth/LoginPage';
 import { ContractDetailPage, ContractsPage } from './features/contracts/ContractsPage';
 import { DashboardPage } from './features/dashboard/DashboardPage';
@@ -26,7 +27,7 @@ import {
 } from './features/timeoff/TimeOffPages';
 import { UsersPage } from './features/users/UsersPage';
 import { AppShell } from './layouts/AppShell';
-import { PAYROLL_ROLES, Role, useAuth } from './lib/auth';
+import { HR_ROLES, PAYROLL_ROLES, Role, useAuth } from './lib/auth';
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -87,6 +88,14 @@ export default function App() {
         <Route path="schedules" element={<SchedulesPage />} />
 
         <Route path="attendance" element={<AttendancePage />} />
+        <Route
+          path="attendance/requests"
+          element={
+            <RequireRole roles={HR_ROLES}>
+              <AttendanceRequestsPage />
+            </RequireRole>
+          }
+        />
 
         <Route path="time-off/requests" element={<TimeOffRequestsPage />} />
         <Route path="time-off/allocations" element={<AllocationsPage />} />

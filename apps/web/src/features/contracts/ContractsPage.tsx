@@ -126,6 +126,8 @@ export function ContractsPage() {
                       <Avatar
                         firstName={contract.employee.firstName}
                         lastName={contract.employee.lastName}
+                        avatarUrl={contract.employee.avatarUrl}
+                        gender={contract.employee.gender}
                         size="sm"
                       />
                       <span className="truncate">

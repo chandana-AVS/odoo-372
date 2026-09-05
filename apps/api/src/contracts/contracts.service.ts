@@ -17,7 +17,14 @@ export class ContractsService {
         status: (query.status as ContractStatus) || undefined,
       },
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, code: true } },
+        employee: { select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          code: true,
+          gender: true,
+          avatarUrl: true,
+        } },
         department: true,
         jobPosition: true,
         salaryStructure: { select: { id: true, name: true } },

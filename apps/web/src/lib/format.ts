@@ -54,8 +54,11 @@ export const time = (value: string | Date | null | undefined) =>
 
 /** 416 -> "6h56" (the elapsed format used by the attendance widget). */
 export function duration(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = Math.floor(minutes % 60);
+  // Clamp at zero: a few seconds of clock skew between server and browser used
+  // to render as "-1h-1" the instant someone checked in.
+  const safe = Math.max(0, minutes);
+  const h = Math.floor(safe / 60);
+  const m = Math.floor(safe % 60);
   return `${h}h${String(m).padStart(2, '0')}`;
 }
 
@@ -98,3 +101,42 @@ export function monthRange(period: string) {
     }),
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Validation helpers                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Validate a phone number: exactly 10 digits, starting 6-9.
+ *
+ * Spaces, hyphens and brackets are ignored, and a leading +91 is accepted and
+ * stripped, so "+91 98765 43210" and "9876543210" are both fine. Placeholder
+ * runs such as 1111111111 are rejected.
+ *
+ * @returns an error message, or null when the value is acceptable
+ */
+export function phoneError(value: string): string | null {
+  const raw = (value ?? '').trim();
+  if (!raw) return null; // optional field — emptiness is handled by the caller
+
+  // Strip an optional +91 country code, then require exactly 10 digits.
+  let digits = raw.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2);
+
+  if (digits.length !== 10) return 'Enter a 10-digit phone number.';
+
+  // The same digit ten times over is never a real number.
+  const allSame = digits.split('').every((d) => d === digits[0]);
+  if (allSame) {
+    return 'That does not look like a real number.';
+  }
+  // A number running straight up from 0 is placeholder data.
+  if (digits === '0123456789') return 'That does not look like a real number.';
+
+  if (!/^[6-9]/.test(digits)) {
+    return 'A mobile number starts with 6, 7, 8 or 9.';
+  }
+
+  return null;
+}
+

@@ -38,6 +38,8 @@ export interface EngineInput {
   leaveDays: number;
   unpaidLeaveDays: number;
   overtimeHours: number;
+  /** Currency value of HR-approved overtime for the period. */
+  overtimeAmount: number;
 }
 
 export interface ComputedLine {

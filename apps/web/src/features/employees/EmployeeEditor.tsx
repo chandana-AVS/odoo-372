@@ -1,14 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as React from 'react';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as React from "react";
 import {
   Button,
   Checkbox,
   Field,
   Input,
   Modal,
+  PhoneInput,
   Select,
-} from '../../components/ui';
-import { api } from '../../lib/api';
+  TextInput,
+} from "../../components/ui";
+import { api } from "../../lib/api";
+import { phoneError } from "../../lib/format";
+import { DepartmentSelect, JobPositionSelect } from "./DepartmentSelect";
+import { ScheduleSelect } from "../schedules/ScheduleSelect";
 
 export interface EmployeeFormValues {
   id?: string;
@@ -23,25 +28,27 @@ export interface EmployeeFormValues {
   managerId: string;
   workingScheduleId: string;
   employeeType: string;
+  gender: string;
   workLocation: string;
   bankAccount: string;
   isActive: boolean;
 }
 
 const EMPTY: EmployeeFormValues = {
-  firstName: '',
-  lastName: '',
-  workEmail: '',
-  personalEmail: '',
-  phone: '',
-  code: '',
-  departmentId: '',
-  jobPositionId: '',
-  managerId: '',
-  workingScheduleId: '',
-  employeeType: 'FULL_TIME',
-  workLocation: '',
-  bankAccount: '',
+  firstName: "",
+  lastName: "",
+  workEmail: "",
+  personalEmail: "",
+  phone: "",
+  code: "",
+  departmentId: "",
+  jobPositionId: "",
+  managerId: "",
+  workingScheduleId: "",
+  employeeType: "FULL_TIME",
+  gender: "UNDISCLOSED",
+  workLocation: "",
+  bankAccount: "",
   isActive: true,
 };
 
@@ -49,19 +56,21 @@ const EMPTY: EmployeeFormValues = {
 export function toFormValues(employee: any): EmployeeFormValues {
   return {
     id: employee.id,
-    firstName: employee.firstName ?? '',
-    lastName: employee.lastName ?? '',
-    workEmail: employee.workEmail ?? '',
-    personalEmail: employee.personalEmail ?? '',
-    phone: employee.phone ?? '',
-    code: employee.code ?? '',
-    departmentId: employee.departmentId ?? employee.department?.id ?? '',
-    jobPositionId: employee.jobPositionId ?? employee.jobPosition?.id ?? '',
-    managerId: employee.managerId ?? employee.manager?.id ?? '',
-    workingScheduleId: employee.workingScheduleId ?? employee.workingSchedule?.id ?? '',
-    employeeType: employee.employeeType ?? 'FULL_TIME',
-    workLocation: employee.workLocation ?? '',
-    bankAccount: employee.bankAccount ?? '',
+    firstName: employee.firstName ?? "",
+    lastName: employee.lastName ?? "",
+    workEmail: employee.workEmail ?? "",
+    personalEmail: employee.personalEmail ?? "",
+    phone: employee.phone ?? "",
+    code: employee.code ?? "",
+    departmentId: employee.departmentId ?? employee.department?.id ?? "",
+    jobPositionId: employee.jobPositionId ?? employee.jobPosition?.id ?? "",
+    managerId: employee.managerId ?? employee.manager?.id ?? "",
+    workingScheduleId:
+      employee.workingScheduleId ?? employee.workingSchedule?.id ?? "",
+    employeeType: employee.employeeType ?? "FULL_TIME",
+    gender: employee.gender ?? "UNDISCLOSED",
+    workLocation: employee.workLocation ?? "",
+    bankAccount: employee.bankAccount ?? "",
     isActive: employee.isActive ?? true,
   };
 }
@@ -84,7 +93,10 @@ export function EmployeeEditor({
   );
   const [errors, setErrors] = React.useState<Record<string, string>>({});
 
-  const set = <K extends keyof EmployeeFormValues>(key: K, value: EmployeeFormValues[K]) => {
+  const set = <K extends keyof EmployeeFormValues>(
+    key: K,
+    value: EmployeeFormValues[K],
+  ) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     setErrors((prev) => {
       if (!prev[key as string]) return prev;
@@ -94,32 +106,28 @@ export function EmployeeEditor({
     });
   };
 
-  const departments = useQuery({
-    queryKey: ['departments'],
-    queryFn: () => api.get<any[]>('/departments'),
-  });
-  const positions = useQuery({
-    queryKey: ['job-positions'],
-    queryFn: () => api.get<any[]>('/job-positions'),
-  });
-  const schedules = useQuery({
-    queryKey: ['working-schedules'],
-    queryFn: () => api.get<any[]>('/working-schedules'),
-  });
+  // Only people flagged as managers — otherwise this lists the whole company.
   const managers = useQuery({
-    queryKey: ['employees'],
-    queryFn: () => api.get<any[]>('/employees'),
+    queryKey: ["employees", "managers"],
+    queryFn: () => api.get<any[]>("/employees?managersOnly=true"),
   });
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (!form.firstName.trim()) next.firstName = 'Required';
-    if (!form.lastName.trim()) next.lastName = 'Required';
-    if (!form.workEmail.trim()) next.workEmail = 'Required';
+    if (!form.firstName.trim()) next.firstName = "Required";
+    if (!form.lastName.trim()) next.lastName = "Required";
+    if (!form.workEmail.trim()) next.workEmail = "Required";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.workEmail.trim()))
-      next.workEmail = 'Enter a valid email address';
-    if (form.personalEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.personalEmail))
-      next.personalEmail = 'Enter a valid email address';
+      next.workEmail = "Enter a valid email address";
+    if (
+      form.personalEmail &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.personalEmail)
+    )
+      next.personalEmail = "Enter a valid email address";
+
+    const phoneProblem = phoneError(form.phone);
+    if (phoneProblem) next.phone = phoneProblem;
+
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -131,12 +139,12 @@ export function EmployeeEditor({
       const body = { ...payload, code: payload.code.trim() || undefined };
       return isEdit
         ? api.patch<any>(`/employees/${id}`, body)
-        : api.post<any>('/employees', body);
+        : api.post<any>("/employees", body);
     },
     onSuccess: (saved) => {
-      queryClient.invalidateQueries({ queryKey: ['employees'] });
-      queryClient.invalidateQueries({ queryKey: ['employee', saved.id] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      queryClient.invalidateQueries({ queryKey: ["employee", saved.id] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       onSaved?.(saved);
       onClose();
     },
@@ -151,17 +159,19 @@ export function EmployeeEditor({
       open
       size="lg"
       onClose={onClose}
-      title={isEdit ? `Edit ${form.firstName} ${form.lastName}` : 'New employee'}
+      title={
+        isEdit ? `Edit ${form.firstName} ${form.lastName}` : "New employee"
+      }
       subtitle={
         isEdit
-          ? 'Changes apply immediately; payroll uses these on the next compute.'
-          : 'Create the employee record, then give them a contract to make payroll possible.'
+          ? "Changes apply immediately; payroll uses these on the next compute."
+          : "Create the employee record, then give them a contract to make payroll possible."
       }
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={save.isPending} onClick={submit}>
-            {isEdit ? 'Save changes' : 'Create employee'}
+            {isEdit ? "Save changes" : "Create employee"}
           </Button>
         </>
       }
@@ -180,17 +190,17 @@ export function EmployeeEditor({
           </h3>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="First Name" required error={errors.firstName}>
-              <Input
+              <TextInput
                 value={form.firstName}
-                onChange={(e) => set('firstName', e.target.value)}
+                onChange={(value) => set("firstName", value)}
                 placeholder="Aarav"
                 autoFocus
               />
             </Field>
             <Field label="Last Name" required error={errors.lastName}>
-              <Input
+              <TextInput
                 value={form.lastName}
-                onChange={(e) => set('lastName', e.target.value)}
+                onChange={(value) => set("lastName", value)}
                 placeholder="Mehta"
               />
             </Field>
@@ -198,18 +208,22 @@ export function EmployeeEditor({
               <Input
                 type="email"
                 value={form.workEmail}
-                onChange={(e) => set('workEmail', e.target.value)}
+                onChange={(e) => set("workEmail", e.target.value)}
                 placeholder="aarav.mehta@oxp.com"
               />
             </Field>
             <Field
               label="Employee Code"
-              hint={isEdit ? 'Codes are fixed once assigned.' : 'Leave blank to auto-generate.'}
+              hint={
+                isEdit
+                  ? "Codes are fixed once assigned."
+                  : "Leave blank to auto-generate."
+              }
             >
               <Input
                 value={form.code}
-                onChange={(e) => set('code', e.target.value.toUpperCase())}
-                placeholder="EMP0023"
+                onChange={(e) => set("code", e.target.value.toUpperCase())}
+                // placeholder="EMP0023"
                 disabled={isEdit}
               />
             </Field>
@@ -223,37 +237,23 @@ export function EmployeeEditor({
           </h3>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Department">
-              <Select
+              <DepartmentSelect
                 value={form.departmentId}
-                onChange={(e) => set('departmentId', e.target.value)}
-              >
-                <option value="">No department</option>
-                {departments.data?.map((department) => (
-                  <option key={department.id} value={department.id}>
-                    {department.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={(id) => set("departmentId", id)}
+              />
             </Field>
 
             <Field label="Job Position">
-              <Select
+              <JobPositionSelect
                 value={form.jobPositionId}
-                onChange={(e) => set('jobPositionId', e.target.value)}
-              >
-                <option value="">No position</option>
-                {positions.data?.map((position) => (
-                  <option key={position.id} value={position.id}>
-                    {position.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={(id) => set("jobPositionId", id)}
+              />
             </Field>
 
             <Field label="Manager">
               <Select
                 value={form.managerId}
-                onChange={(e) => set('managerId', e.target.value)}
+                onChange={(e) => set("managerId", e.target.value)}
               >
                 <option value="">No manager</option>
                 {managers.data
@@ -261,8 +261,11 @@ export function EmployeeEditor({
                   .map((candidate) => (
                     <option key={candidate.id} value={candidate.id}>
                       {/* Code disambiguates people who share a name. */}
-                      {candidate.firstName} {candidate.lastName} · {candidate.code}
-                      {candidate.department?.name ? ` · ${candidate.department.name}` : ''}
+                      {candidate.firstName} {candidate.lastName} ·{" "}
+                      {candidate.code}
+                      {candidate.department?.name
+                        ? ` · ${candidate.department.name}`
+                        : ""}
                     </option>
                   ))}
               </Select>
@@ -272,23 +275,16 @@ export function EmployeeEditor({
               label="Working Schedule"
               hint="Sets the expected hours attendance and payroll compare against."
             >
-              <Select
+              <ScheduleSelect
                 value={form.workingScheduleId}
-                onChange={(e) => set('workingScheduleId', e.target.value)}
-              >
-                <option value="">No schedule</option>
-                {schedules.data?.map((schedule) => (
-                  <option key={schedule.id} value={schedule.id}>
-                    {schedule.name} ({schedule.hoursPerWeek}h/week)
-                  </option>
-                ))}
-              </Select>
+                onChange={(id) => set("workingScheduleId", id)}
+              />
             </Field>
 
             <Field label="Employee Type" required>
               <Select
                 value={form.employeeType}
-                onChange={(e) => set('employeeType', e.target.value)}
+                onChange={(e) => set("employeeType", e.target.value)}
               >
                 <option value="FULL_TIME">Full Time</option>
                 <option value="PART_TIME">Part Time</option>
@@ -298,9 +294,9 @@ export function EmployeeEditor({
             </Field>
 
             <Field label="Work Location">
-              <Input
+              <TextInput
                 value={form.workLocation}
-                onChange={(e) => set('workLocation', e.target.value)}
+                onChange={(value) => set("workLocation", value)}
                 placeholder="Mumbai"
               />
             </Field>
@@ -317,13 +313,24 @@ export function EmployeeEditor({
               <Input
                 type="email"
                 value={form.personalEmail}
-                onChange={(e) => set('personalEmail', e.target.value)}
+                onChange={(e) => set("personalEmail", e.target.value)}
               />
             </Field>
-            <Field label="Phone">
-              <Input
+            <Field label="Gender" hint="Sets the default avatar. Optional.">
+              <Select
+                value={form.gender}
+                onChange={(e) => set("gender", e.target.value)}
+              >
+                <option value="UNDISCLOSED">Prefer not to say</option>
+                <option value="FEMALE">Female</option>
+                <option value="MALE">Male</option>
+                <option value="OTHER">Other</option>
+              </Select>
+            </Field>
+            <Field label="Phone" error={errors.phone}>
+              <PhoneInput
                 value={form.phone}
-                onChange={(e) => set('phone', e.target.value)}
+                onChange={(value) => set("phone", value)}
                 placeholder="+91 98765 43210"
               />
             </Field>
@@ -334,7 +341,7 @@ export function EmployeeEditor({
             >
               <Input
                 value={form.bankAccount}
-                onChange={(e) => set('bankAccount', e.target.value)}
+                onChange={(e) => set("bankAccount", e.target.value)}
                 placeholder="IN6011000000"
               />
             </Field>
@@ -343,7 +350,7 @@ export function EmployeeEditor({
 
         <Checkbox
           checked={form.isActive}
-          onChange={(isActive) => set('isActive', isActive)}
+          onChange={(isActive) => set("isActive", isActive)}
           label="Employee is active"
         />
 

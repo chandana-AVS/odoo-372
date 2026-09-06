@@ -395,6 +395,7 @@ export function NewHireEditor({
               hint={wagePreview ? `${wagePreview} per month` : undefined}
             >
               <NumberInput
+                decimal
                 value={form.wage}
                 onChange={(value) => set("wage", value)}
                 placeholder="75000"

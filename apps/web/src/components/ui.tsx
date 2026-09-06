@@ -1,5 +1,6 @@
 import { AlertTriangle, Check, Inbox, Loader2, Search, SearchX, X } from 'lucide-react';
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { avatarTint, cn, initials } from '../lib/format';
 import { FemaleAvatarIcon, MaleAvatarIcon } from './AvatarIcons';
 
@@ -515,8 +516,10 @@ export function Modal({
 
   const widths = { sm: 'sm:max-w-md', md: 'sm:max-w-xl', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl' };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+  // Portalled to <body>: the app header sets `backdrop-blur`, which creates a
+  // containing block that would otherwise trap this fixed overlay inside it.
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
       <div
         className="absolute inset-0 bg-zinc-950/50 backdrop-blur-[2px]"
         onClick={onClose}
@@ -547,7 +550,8 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

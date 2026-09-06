@@ -28,7 +28,9 @@ export class AuthService {
     const payload = { sub: user.id, email: user.email, employeeId: user.employeeId, roles };
 
     return {
-      accessToken: await this.jwt.signAsync(payload, { expiresIn: '12h' }),
+      // Eight hours covers a working day. The client also enforces a 15-minute
+      // idle timeout; this is the hard ceiling a stolen token cannot outlive.
+      accessToken: await this.jwt.signAsync(payload, { expiresIn: '8h' }),
       refreshToken: await this.jwt.signAsync({ sub: user.id }, { expiresIn: '7d' }),
       user: this.publicUser(user, roles),
     };

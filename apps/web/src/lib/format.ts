@@ -5,22 +5,40 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const inr = new Intl.NumberFormat('en-IN', {
+/** Whole rupees — used only where a value has no paise. */
+const inrWhole = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',
   maximumFractionDigits: 0,
 });
 
+/** Always two decimals. */
 const inrPrecise = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',
   minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
-export const money = (value: number | string | null | undefined, precise = false) =>
-  value === null || value === undefined
-    ? '—'
-    : (precise ? inrPrecise : inr).format(Number(value));
+/**
+ * Format a rupee amount.
+ *
+ * Paise are shown whenever they exist: a salary of 69,500.75 must never render
+ * as 69,501, because the rounded figure would not match the payslip or the
+ * bank transfer. Whole amounts stay clean, with no trailing ".00".
+ *
+ * @param precise force two decimals even on a whole amount
+ */
+export const money = (value: number | string | null | undefined, precise = false) => {
+  if (value === null || value === undefined) return '—';
+  const amount = Number(value);
+  if (Number.isNaN(amount)) return '—';
+
+  // Rounded comparison, so floating-point noise (100.00000000001) is not
+  // mistaken for a genuine fraction.
+  const hasPaise = Math.round(amount * 100) % 100 !== 0;
+  return (precise || hasPaise ? inrPrecise : inrWhole).format(amount);
+};
 
 /** 1_520_000 -> "15.2L" — matches the dashboard chart labels in the mockup. */
 export function compactMoney(value: number): string {

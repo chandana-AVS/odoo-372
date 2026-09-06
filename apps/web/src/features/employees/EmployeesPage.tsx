@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { LayoutGrid, List, Plus, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LayoutGrid, List, Plus, Users } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -37,6 +37,55 @@ interface EmployeeRow {
   jobPosition: { name: string } | null;
   manager: { firstName: string; lastName: string } | null;
   workingSchedule: { name: string } | null;
+}
+
+/**
+ * Shared pager for both employee views. Kept local to this page — it reads the
+ * already-fetched list, so there is no server round-trip when changing page.
+ */
+function EmployeePager({
+  page,
+  pageCount,
+  pageSize,
+  total,
+  onChange,
+}: {
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  total: number;
+  onChange: (page: number) => void;
+}) {
+  if (pageCount <= 1) return null;
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs text-muted">
+        Showing{' '}
+        <span className="font-medium tabular text-ink">
+          {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)}
+        </span>{' '}
+        of <span className="font-medium tabular text-ink">{total}</span> employees
+      </p>
+      <div className="flex items-center gap-2">
+        <Button size="sm" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+          <ChevronLeft className="h-3.5 w-3.5" />
+          Previous
+        </Button>
+        <span className="tabular text-xs text-muted">
+          Page {page} of {pageCount}
+        </span>
+        <Button
+          size="sm"
+          disabled={page >= pageCount}
+          onClick={() => onChange(page + 1)}
+        >
+          Next
+          <ChevronRight className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export function EmployeesPage() {
@@ -80,6 +129,22 @@ export function EmployeesPage() {
     queryFn: () =>
       api.get<EmployeeRow[]>(`/employees${qs({ q: debounced, departmentId, employeeType })}`),
   });
+
+  /** List view pages at 20; kanban shows every card. */
+  const PAGE_SIZE = 20;
+  const [page, setPage] = React.useState(1);
+
+  const pageCount = Math.max(Math.ceil((data?.length ?? 0) / PAGE_SIZE), 1);
+  // Clamp rather than reset: deleting the last row of page 9 should land on 8,
+  // not throw the user back to the beginning.
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = (data ?? []).slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  // Any filter change makes the old page number meaningless.
+  React.useEffect(() => setPage(1), [q, departmentId, employeeType, view]);
 
   return (
     <>
@@ -235,7 +300,7 @@ export function EmployeesPage() {
               </tr>
             </thead>
             <tbody>
-              {data.map((employee) => (
+              {pageRows.map((employee) => (
                 <Tr key={employee.id} onClick={() => navigate(`/employees/${employee.id}`)}>
                   <Td>
                     <div className="flex items-center gap-2.5">
@@ -275,6 +340,14 @@ export function EmployeesPage() {
               ))}
             </tbody>
           </TableWrap>
+
+          <EmployeePager
+            page={currentPage}
+            pageCount={pageCount}
+            pageSize={PAGE_SIZE}
+            total={data.length}
+            onChange={setPage}
+          />
         </Card>
       )}
 

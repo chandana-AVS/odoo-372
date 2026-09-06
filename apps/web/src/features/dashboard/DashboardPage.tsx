@@ -63,6 +63,115 @@ interface Dashboard {
   departmentOverview: { department: string; headcount: number; monthlySalary: number }[];
 }
 
+/* -------------------------------------------------------------------------- */
+/* KPI card visuals                                                            */
+/* -------------------------------------------------------------------------- */
+
+const TONES = {
+  brand: { stroke: 'rgb(var(--brand))', text: 'text-brand', bg: 'bg-brand' },
+  info: { stroke: 'rgb(var(--info))', text: 'text-info', bg: 'bg-info' },
+  ok: { stroke: 'rgb(var(--ok))', text: 'text-ok', bg: 'bg-ok' },
+  warn: { stroke: 'rgb(var(--warn))', text: 'text-warn', bg: 'bg-warn' },
+} as const;
+
+type Tone = keyof typeof TONES;
+
+/**
+ * A tiny inline trend line. Deliberately axis-free: it shows shape and
+ * direction, not values — the number above it is the precise figure.
+ */
+function Sparkline({ points, tone }: { points: number[]; tone: Tone }) {
+  const clean = points.filter((n) => Number.isFinite(n));
+  if (clean.length < 2) return null;
+
+  const max = Math.max(...clean);
+  const min = Math.min(...clean);
+  const span = max - min || 1;
+  const w = 100;
+  const h = 28;
+
+  const coords = clean.map((value, i) => {
+    const x = (i / (clean.length - 1)) * w;
+    const y = h - ((value - min) / span) * (h - 4) - 2;
+    return [x, y] as const;
+  });
+
+  const line = coords.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' ');
+  const area = `${line} L${w} ${h} L0 ${h} Z`;
+  const [lastX, lastY] = coords[coords.length - 1];
+  const rising = clean[clean.length - 1] >= clean[0];
+
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      className="mt-2 h-7 w-full"
+      aria-hidden
+    >
+      <path d={area} fill={TONES[tone].stroke} opacity={0.12} />
+      <path
+        d={line}
+        fill="none"
+        stroke={TONES[tone].stroke}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      {/* Marks where the series ends, so the latest point is obvious. */}
+      <circle cx={lastX} cy={lastY} r={2.5} fill={TONES[tone].stroke} />
+      {!rising && <title>Trending down</title>}
+    </svg>
+  );
+}
+
+/** A slim share bar for "x of y" figures. */
+function ProgressBar({ percent, tone }: { percent: number; tone: Tone }) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  return (
+    <div className="mt-2.5">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-elevated">
+        <div
+          className={cn('h-full rounded-full transition-all duration-500', TONES[tone].bg)}
+          style={{ width: `${clamped}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** A circular gauge for a single percentage. */
+function ProgressRing({ percent, tone }: { percent: number; tone: Tone }) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const radius = 15;
+  const circumference = 2 * Math.PI * radius;
+
+  return (
+    <svg viewBox="0 0 36 36" className="h-9 w-9 -rotate-90" aria-hidden>
+      <circle
+        cx="18"
+        cy="18"
+        r={radius}
+        fill="none"
+        stroke="rgb(var(--line))"
+        strokeWidth={3}
+      />
+      <circle
+        cx="18"
+        cy="18"
+        r={radius}
+        fill="none"
+        stroke={TONES[tone].stroke}
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference * (1 - clamped / 100)}
+        className="transition-all duration-700"
+      />
+    </svg>
+  );
+}
+
 function ChartTooltip({ active, payload, label, formatter }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -95,36 +204,58 @@ export function DashboardPage() {
 
   const kpis = data?.kpis;
 
+  // Each card carries a small visual: a sparkline for series data, a progress
+  // ring for anything measured against a target, or a share bar for a subtotal.
+  const trend = data?.monthlyTrend ?? [];
+
   const cards = [
     {
       label: 'Total Net Salary Paid',
       value: money(kpis?.totalNetSalaryPaid ?? 0),
       icon: Wallet,
       hint: `${money(kpis?.totalNetSalary ?? 0)} computed`,
+      spark: trend.map((m) => m.net),
+      // How much of what was computed has actually been paid out.
+      progress:
+        kpis?.totalNetSalary
+          ? (kpis.totalNetSalaryPaid / kpis.totalNetSalary) * 100
+          : 0,
+      tone: 'brand' as const,
     },
     {
       label: 'Payslips Generated',
       value: String(kpis?.payslipsGenerated ?? 0),
       icon: FileText,
       hint: `${kpis?.headcount ?? 0} active employees`,
+      spark: trend.map((m) => m.payslips),
+      progress:
+        kpis?.headcount
+          ? (kpis.payslipsGenerated / kpis.headcount) * 100
+          : 0,
+      tone: 'info' as const,
     },
     {
       label: 'Avg Salary / Employee',
       value: money(kpis?.avgSalaryPerEmployee ?? 0),
       icon: TrendingUp,
       hint: 'Net, this period',
+      spark: trend.map((m) => (m.payslips ? m.net / m.payslips : 0)),
+      tone: 'ok' as const,
     },
     {
       label: 'Approved Time Off',
       value: `${kpis?.approvedTimeOffDays ?? 0} days`,
       icon: CalendarDays,
       hint: `${data?.timeOffOverview.pendingRequests ?? 0} pending`,
+      tone: 'warn' as const,
     },
     {
       label: 'Attendance Health',
       value: `${kpis?.attendanceHealth ?? 0}%`,
       icon: HeartPulse,
       hint: `${data?.attendanceOverview.totalHours ?? 0}h logged`,
+      ring: kpis?.attendanceHealth ?? 0,
+      tone: 'ok' as const,
     },
   ];
 
@@ -198,17 +329,38 @@ export function DashboardPage() {
           {/* ------------------------------------------------------ KPI cards */}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {cards.map((card) => (
-              <Card key={card.label} className="p-4">
+              <Card
+                key={card.label}
+                className="group p-4 transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-pop"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <span className="text-[11px] font-medium uppercase tracking-wide text-faint">
                     {card.label}
                   </span>
-                  <card.icon className="h-4 w-4 shrink-0 text-brand" />
+                  {card.ring !== undefined ? (
+                    <ProgressRing percent={card.ring} tone={card.tone} />
+                  ) : (
+                    <span
+                      className={cn(
+                        'rounded-lg p-1.5 transition-colors',
+                        'bg-elevated group-hover:bg-brand-soft',
+                      )}
+                    >
+                      <card.icon className={cn('h-4 w-4 shrink-0', TONES[card.tone].text)} />
+                    </span>
+                  )}
                 </div>
+
                 <p className="mt-2 truncate text-xl font-semibold tabular tracking-tight">
                   {card.value}
                 </p>
                 <p className="mt-0.5 truncate text-[11px] text-muted">{card.hint}</p>
+
+                {/* Shape of the last six months, where the figure is a series. */}
+                {card.spark && <Sparkline points={card.spark} tone={card.tone} />}
+                {card.progress !== undefined && (
+                  <ProgressBar percent={card.progress} tone={card.tone} />
+                )}
               </Card>
             ))}
           </div>

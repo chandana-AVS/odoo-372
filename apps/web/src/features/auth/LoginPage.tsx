@@ -21,6 +21,9 @@ export function LoginPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
+  // Set by the idle-timeout redirect, so the sign-out is explained.
+  const timedOut = new URLSearchParams(window.location.search).get('reason') === 'idle';
+
   // Live headline counts — hardcoding these left them stale as the data grew.
   const stats = useQuery({
     queryKey: ['auth', 'stats'],
@@ -84,6 +87,12 @@ export function LoginPage() {
                 required
               />
             </Field>
+
+            {timedOut && !error && (
+              <p className="rounded-lg border border-warn/25 bg-warn/5 px-3 py-2 text-xs text-warn">
+                You were signed out after a period of inactivity.
+              </p>
+            )}
 
             {error && (
               <p className="rounded-lg border border-danger/25 bg-danger/5 px-3 py-2 text-xs text-danger">

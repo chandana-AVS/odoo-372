@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { FileText, Plus, Receipt } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { FileText, Mail, Plus, Receipt } from 'lucide-react';
 import * as React from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -7,6 +7,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   EmptyState,
   ErrorBlock,
   LoadingBlock,
@@ -23,6 +24,7 @@ import {
 import { api, qs } from '../../lib/api';
 import { money, shortDate } from '../../lib/format';
 import { useSearch } from '../../lib/search';
+import { PAYROLL_ROLES, useAuth } from '../../lib/auth';
 
 /* -------------------------------------------------------------------------- */
 /* Payruns                                                                     */
@@ -158,13 +160,49 @@ export function PayslipsPage() {
   const employeeId = params.get('employeeId') ?? '';
   const [state, setState] = React.useState('');
   const [q, setQ] = React.useState('');
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [notice, setNotice] = React.useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { can } = useAuth();
+  const canSend = can(...PAYROLL_ROLES);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['payslips', employeeId, state],
-    queryFn: () => api.get<any[]>(`/payslips${qs({ employeeId, state })}`),
+  const send = useMutation({
+    mutationFn: () =>
+      api.post<{ sent: number; skipped: { employee: string; reason: string }[] }>(
+        '/payslips/send',
+        { ids: [...selected] },
+      ),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['payslips'] });
+      setSelected(new Set());
+      setNotice(
+        `Sent ${result.sent} payslip(s).` +
+          (result.skipped.length
+            ? ` Skipped ${result.skipped.length}: ${result.skipped
+                .map((s) => `${s.employee} (${s.reason})`)
+                .join(', ')}`
+            : ''),
+      );
+    },
   });
 
-  const rows = useSearch(data, q, (payslip) => [
+  const [page, setPage] = React.useState(1);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['payslips', employeeId, state, page],
+    queryFn: () =>
+      api.get<{
+        rows: any[];
+        total: number;
+        page: number;
+        pageSize: number;
+        pageCount: number;
+      }>(`/payslips${qs({ employeeId, state, page })}`),
+    placeholderData: (previous) => previous,
+  });
+
+  const payslipRows = data?.rows ?? [];
+  const rows = useSearch(payslipRows, q, (payslip) => [
     payslip.employee,
     payslip.number,
     payslip.state,
@@ -173,6 +211,23 @@ export function PayslipsPage() {
     payslip.grossAmount,
     payslip.netAmount,
   ]);
+
+  // A filter change hides rows, so a stale selection would send invisible ones.
+  React.useEffect(() => setSelected(new Set()), [employeeId, state, q, page]);
+  React.useEffect(() => setPage(1), [employeeId, state, q]);
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const allChecked = rows.length > 0 && rows.every((r) => selected.has(r.id));
+  const someChecked = rows.some((r) => selected.has(r.id));
+  const toggleAll = () =>
+    setSelected(allChecked ? new Set() : new Set(rows.map((r) => r.id)));
 
   return (
     <>
@@ -195,14 +250,42 @@ export function PayslipsPage() {
               <option value="VALIDATED">Validated</option>
               <option value="PAID">Paid</option>
             </Select>
+            {canSend && selected.size > 0 && (
+              <Button
+                variant="primary"
+                loading={send.isPending}
+                onClick={() => send.mutate()}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                Email {selected.size} payslip{selected.size === 1 ? '' : 's'}
+              </Button>
+            )}
           </>
         }
       />
 
+      {notice && (
+        <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-ok/25 bg-ok/5 px-4 py-3 text-sm">
+          <span>{notice}</span>
+          <button
+            onClick={() => setNotice(null)}
+            className="shrink-0 text-xs text-muted hover:text-ink"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {send.isError && (
+        <div className="mb-5 rounded-xl border border-danger/25 bg-danger/5 px-4 py-3 text-sm text-danger">
+          {(send.error as Error).message}
+        </div>
+      )}
+
       {error && <ErrorBlock error={error} />}
       {isLoading && <LoadingBlock rows={6} />}
 
-      {data && data.length === 0 && (
+      {data && payslipRows.length === 0 && (
         <Card>
           <EmptyState
             icon={FileText}
@@ -212,7 +295,7 @@ export function PayslipsPage() {
         </Card>
       )}
 
-      {data && data.length > 0 && rows.length === 0 && (
+      {data && payslipRows.length > 0 && rows.length === 0 && (
         <Card>
           <NoResults query={q} onClear={() => setQ('')} noun="payslips" />
         </Card>
@@ -223,6 +306,15 @@ export function PayslipsPage() {
           <TableWrap>
             <thead>
               <tr>
+                {canSend && (
+                  <Th className="w-10">
+                    <Checkbox
+                      checked={allChecked}
+                      indeterminate={!allChecked && someChecked}
+                      onChange={toggleAll}
+                    />
+                  </Th>
+                )}
                 <Th>Employee</Th>
                 <Th>Payslip</Th>
                 <Th>Pay Run</Th>
@@ -238,6 +330,17 @@ export function PayslipsPage() {
                   key={payslip.id}
                   onClick={() => navigate(`/payroll/payslips/${payslip.id}`)}
                 >
+                  {canSend && (
+                    <Td>
+                      {/* Stop the row's navigate firing when ticking a box. */}
+                      <span onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selected.has(payslip.id)}
+                          onChange={() => toggle(payslip.id)}
+                        />
+                      </span>
+                    </Td>
+                  )}
                   <Td>
                     <div className="flex items-center gap-2.5">
                       <Avatar
@@ -268,6 +371,40 @@ export function PayslipsPage() {
               ))}
             </tbody>
           </TableWrap>
+
+          {/* Pager — 50 rows a page, so a full payrun stays readable. */}
+          {data && data.pageCount > 1 && (
+            <div className="flex flex-col gap-2 border-t border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted">
+                Showing{' '}
+                <span className="font-medium text-ink tabular">
+                  {(data.page - 1) * data.pageSize + 1}–
+                  {Math.min(data.page * data.pageSize, data.total)}
+                </span>{' '}
+                of <span className="font-medium text-ink tabular">{data.total}</span> payslips
+                {q && ' (search filters this page)'}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  disabled={data.page <= 1}
+                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                >
+                  Previous
+                </Button>
+                <span className="tabular text-xs text-muted">
+                  Page {data.page} of {data.pageCount}
+                </span>
+                <Button
+                  size="sm"
+                  disabled={data.page >= data.pageCount}
+                  onClick={() => setPage((p) => Math.min(p + 1, data.pageCount))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       )}
     </>

@@ -15,6 +15,7 @@ import { cn } from '../lib/format';
 import { HR_ROLES, PAYROLL_ROLES, Role, useAuth } from '../lib/auth';
 import { AttendanceWidget } from './AttendanceWidget';
 import { GlobalSearch } from './GlobalSearch';
+import { SessionTimeout } from './SessionTimeout';
 
 interface NavItem {
   label: string;
@@ -161,6 +162,8 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen bg-bg">
+      <SessionTimeout />
+
       {/* ------------------------------------------------------------ top bar */}
       <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-3 px-4 sm:px-6">

@@ -126,7 +126,9 @@ export function GlobalSearch() {
   });
   const payslips = useQuery({
     queryKey: ['payslips', '', ''],
-    queryFn: () => api.get<any[]>('/payslips'),
+    // One large page: results are filtered client-side and capped at 5.
+    queryFn: () =>
+      api.get<{ rows: any[] }>('/payslips?pageSize=200').then((r) => r.rows),
     enabled: term.length > 0 && isPayroll,
     staleTime: 60_000,
   });
